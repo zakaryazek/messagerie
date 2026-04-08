@@ -4,20 +4,22 @@ const pool = require('./db');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
+const groupesRoutes = require('./routes/groupes');
+const authMiddleware = require('./middleware/auth');
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
+// routes
 app.use('/auth', authRoutes);
+app.use('/groupes', groupesRoutes);
 
 app.get('/', (req, res) => res.json({ message: 'API OK' }));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Serveur lancé sur le port ${PORT}`));
 
-const authMiddleware = require('./middleware/auth');
 
 // route de test
 app.get('/me', authMiddleware, async (req, res) => {
