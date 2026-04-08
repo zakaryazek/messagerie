@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const groupesRoutes = require('./routes/groupes');
+const messagesRoutes = require('./routes/messages');
 const authMiddleware = require('./middleware/auth');
 
 const app = express();
@@ -14,6 +15,7 @@ app.use(express.json());
 // routes
 app.use('/auth', authRoutes);
 app.use('/groupes', groupesRoutes);
+app.use('/groupes/:id/messages', messagesRoutes);
 
 app.get('/', (req, res) => res.json({ message: 'API OK' }));
 
