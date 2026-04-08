@@ -49,6 +49,9 @@ export default function Groupes() {
       <div className="flex items-center justify-between px-6 py-4 bg-gray-900 border-b border-gray-800">
         <h1 className="text-lg font-bold">Messagerie</h1>
         <div className="flex items-center gap-4">
+          <button onClick={() => navigate('/amis')} className="text-sm text-indigo-400 hover:text-indigo-300">
+            Amis
+          </button>
           <span className="text-gray-400 text-sm">@{pseudo}</span>
           <button onClick={logout} className="text-sm text-red-400 hover:text-red-300">
             Déconnexion
