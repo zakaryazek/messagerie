@@ -3,195 +3,368 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 const pool = require('./db');
+const onlineUsers = new Map();
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
+const meRoutes = require('./routes/me');
 const groupesRoutes = require('./routes/groupes');
 const messagesRoutes = require('./routes/messages');
 const friendshipsRoutes = require('./routes/friendships');
 const usersRoutes = require('./routes/users');
 const dmRoutes = require('./routes/dm');
-const authMiddleware = require('./middleware/auth');
+const conversationsRoutes = require('./routes/conversations');
+const uploadRoutes = require('./routes/upload');
+const settingsRoutes = require('./routes/settings');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*' }
-});
+const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Routes HTTP
 app.use('/auth', authRoutes);
+app.use('/me', meRoutes);
 app.use('/groupes', groupesRoutes);
 app.use('/groupes/:id/messages', messagesRoutes);
-app.use('/friendships', friendshipsRoutes);
+app.use('/friendships', friendshipsRoutes(io));
 app.use('/users', usersRoutes);
 app.use('/dm/:userId/messages', dmRoutes);
+app.use('/conversations', conversationsRoutes);
+app.use('/upload', uploadRoutes);
+app.use('/settings', settingsRoutes(io));
 
 app.get('/', (req, res) => res.json({ message: 'API OK' }));
 
-app.get('/me', authMiddleware, async (req, res) => {
-  const result = await pool.query(
-    'SELECT id, pseudo, created_at FROM users WHERE id = $1',
-    [req.userId]
-  );
-  res.json(result.rows[0]);
-});
+// Helper : préfixe l'URL d'attachment si relative
+function fullUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  return (process.env.API_BASE_URL || 'http://localhost:3001') + url;
+}
 
-// ─── Socket.io ────────────────────────────────────────────────────────────────
-
-// Middleware Socket.io — vérifie le JWT à la connexion
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error('Token manquant'));
-
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     socket.userId = decoded.userId;
     next();
-  } catch (err) {
-    next(new Error('Token invalide ou expiré'));
-  }
+  } catch (err) { next(new Error('Token invalide ou expiré')); }
 });
 
 io.on('connection', (socket) => {
-  console.log(`Socket connecté : userId=${socket.userId}`);
+  onlineUsers.set(socket.userId, socket.id);
+  io.emit('userOnline', socket.userId);
+  socket.emit('onlineUsers', Array.from(onlineUsers.keys()));
 
-  // Rejoindre la room d'un groupe
+  // --- GROUPES ---
+
   socket.on('joinRoom', async (groupeId) => {
-    // Vérifier que l'utilisateur est bien membre
-    const result = await pool.query(
-      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
-      [groupeId, socket.userId]
-    );
-    if (result.rows.length === 0) {
-      return socket.emit('error', 'Vous n\'êtes pas membre de ce groupe');
-    }
-    socket.join(`groupe_${groupeId}`);
-    console.log(`userId=${socket.userId} a rejoint la room groupe_${groupeId}`);
+    const id = Number(groupeId);
+    try {
+      const result = await pool.query(
+        'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [id, socket.userId]
+      );
+      if (result.rows.length === 0) return socket.emit('error', 'Non membre du groupe');
+      socket.join('groupe_' + id);
+    } catch (err) { console.error('Erreur joinRoom:', err.message); }
   });
 
-  // Quitter la room d'un groupe
-  socket.on('leaveRoom', (groupeId) => {
-    socket.leave(`groupe_${groupeId}`);
-    console.log(`userId=${socket.userId} a quitté la room groupe_${groupeId}`);
+  socket.on('leaveRoom', (groupeId) => socket.leave('groupe_' + Number(groupeId)));
+
+  socket.on('sendMessage', async ({ groupeId, contenu, attachmentUrl, replyToId }) => {
+    const id = Number(groupeId);
+    try {
+      if (!contenu && !attachmentUrl) return socket.emit('error', 'Message vide');
+      const result = await pool.query(
+        `INSERT INTO messages (contenu, sender_id, groupe_id, attachment_url, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, contenu, attachment_url, created_at, reply_to_id`,
+        [contenu || null, socket.userId, id, attachmentUrl || null, replyToId || null]
+      );
+      const user = await pool.query('SELECT pseudo FROM users WHERE id = $1', [socket.userId]);
+      const msg = result.rows[0];
+      io.to('groupe_' + id).emit('newMessage', {
+        ...msg,
+        attachment_url: fullUrl(msg.attachment_url),
+        sender: user.rows[0].pseudo,
+        sender_id: socket.userId,
+        groupe_id: id,
+        reactions: []
+      });
+    } catch (err) { console.error('Erreur sendMessage:', err.message); }
   });
 
-  // Envoyer un message en temps réel
-  socket.on('sendMessage', async ({ groupeId, contenu }) => {
-    if (!contenu || contenu.trim() === '') {
-      return socket.emit('error', 'Le contenu du message est requis');
-    }
+  socket.on('editMessage', async ({ messageId, contenu, groupeId }) => {
+    try {
+      const result = await pool.query(
+        `UPDATE messages SET contenu = $1, edited_at = NOW()
+         WHERE id = $2 AND sender_id = $3 AND deleted_at IS NULL
+         RETURNING id, contenu, edited_at`,
+        [contenu, messageId, socket.userId]
+      );
+      if (result.rows.length === 0) return;
+      io.to('groupe_' + groupeId).emit('messageEdited', result.rows[0]);
+    } catch (err) { console.error(err.message); }
+  });
 
-    // Vérifier membership
-    const membership = await pool.query(
-      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
-      [groupeId, socket.userId]
-    );
-    if (membership.rows.length === 0) {
-      return socket.emit('error', 'Vous n\'êtes pas membre de ce groupe');
-    }
+  socket.on('deleteMessage', async ({ messageId, groupeId }) => {
+    try {
+      const result = await pool.query(
+        `UPDATE messages SET deleted_at = NOW() WHERE id = $1 AND sender_id = $2 RETURNING id`,
+        [messageId, socket.userId]
+      );
+      if (result.rows.length === 0) return;
+      io.to('groupe_' + groupeId).emit('messageDeleted', { messageId });
+    } catch (err) { console.error(err.message); }
+  });
 
-    // Persister en base
-    const result = await pool.query(
-      `INSERT INTO messages (contenu, sender_id, groupe_id)
-       VALUES ($1, $2, $3)
-       RETURNING id, contenu, created_at`,
-      [contenu.trim(), socket.userId, groupeId]
-    );
-    const message = result.rows[0];
+  socket.on('markReadGroupe', async ({ messageId, groupeId }) => {
+    try {
+      await pool.query(
+        `INSERT INTO message_reads (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [messageId, socket.userId]
+      );
+      const readers = await pool.query(
+        `SELECT u.pseudo FROM message_reads mr
+         JOIN users u ON u.id = mr.user_id WHERE mr.message_id = $1`,
+        [messageId]
+      );
+      io.to('groupe_' + groupeId).emit('groupeRead', { messageId, readers: readers.rows.map(r => r.pseudo) });
+    } catch (err) { console.error(err.message); }
+  });
 
-    // Récupérer le pseudo de l'expéditeur
-    const user = await pool.query(
-      'SELECT pseudo FROM users WHERE id = $1',
-      [socket.userId]
-    );
+  // --- DM ---
 
-    const payload = {
-      ...message,
-      sender: user.rows[0].pseudo,
-      groupe_id: groupeId
-    };
+  socket.on('joinDM', async (otherId) => {
+    const targetId = Number(otherId);
+    try {
+      const result = await pool.query(
+        `SELECT 1 FROM friendships WHERE statut = 'accepted'
+         AND ((demandeur_id = $1 AND receveur_id = $2) OR (demandeur_id = $2 AND receveur_id = $1))`,
+        [socket.userId, targetId]
+      );
+      if (result.rows.length === 0) return socket.emit('error', 'Pas amis');
+      socket.join('dm_' + Math.min(socket.userId, targetId) + '_' + Math.max(socket.userId, targetId));
+    } catch (err) { console.error('Erreur joinDM:', err.message); }
+  });
 
-    // Émettre à tous les membres de la room (expéditeur inclus)
-    io.to(`groupe_${groupeId}`).emit('newMessage', payload);
+  socket.on('leaveDM', (otherId) => {
+    const t = Number(otherId);
+    socket.leave('dm_' + Math.min(socket.userId, t) + '_' + Math.max(socket.userId, t));
+  });
+
+  socket.on('sendPrivateMessage', async ({ receveurId, contenu, attachmentUrl, replyToId }) => {
+    const targetId = Number(receveurId);
+    try {
+      if (!contenu && !attachmentUrl) return socket.emit('error', 'Message vide');
+      const result = await pool.query(
+        `INSERT INTO messages_prives (contenu, sender_id, receveur_id, attachment_url, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, contenu, attachment_url, created_at, reply_to_id`,
+        [contenu || null, socket.userId, targetId, attachmentUrl || null, replyToId || null]
+      );
+      const user = await pool.query('SELECT pseudo FROM users WHERE id = $1', [socket.userId]);
+      const msg = result.rows[0];
+      const roomId = 'dm_' + Math.min(socket.userId, targetId) + '_' + Math.max(socket.userId, targetId);
+      io.to(roomId).emit('newPrivateMessage', {
+        ...msg,
+        attachment_url: fullUrl(msg.attachment_url),
+        sender: user.rows[0].pseudo,
+        sender_id: socket.userId,
+        receveur_id: targetId,
+        reactions: []
+      });
+    } catch (err) { console.error('Erreur sendPrivateMessage:', err.message); }
+  });
+
+  socket.on('editDM', async ({ messageId, contenu, otherId }) => {
+    try {
+      const result = await pool.query(
+        `UPDATE messages_prives SET contenu = $1, edited_at = NOW()
+         WHERE id = $2 AND sender_id = $3 AND deleted_at IS NULL
+         RETURNING id, contenu, edited_at`,
+        [contenu, messageId, socket.userId]
+      );
+      if (result.rows.length === 0) return;
+      const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+      io.to(roomId).emit('dmEdited', result.rows[0]);
+    } catch (err) { console.error(err.message); }
+  });
+
+  socket.on('deleteDM', async ({ messageId, otherId }) => {
+    try {
+      const result = await pool.query(
+        `UPDATE messages_prives SET deleted_at = NOW() WHERE id = $1 AND sender_id = $2 RETURNING id`,
+        [messageId, socket.userId]
+      );
+      if (result.rows.length === 0) return;
+      const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+      io.to(roomId).emit('dmDeleted', { messageId });
+    } catch (err) { console.error(err.message); }
+  });
+
+  socket.on('markReadDM', async ({ messageId, otherId }) => {
+    try {
+      await pool.query(
+        `INSERT INTO message_prives_reads (message_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [messageId]
+      );
+      const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+      io.to(roomId).emit('dmRead', { messageId, readBy: socket.userId });
+    } catch (err) { console.error(err.message); }
+  });
+
+  // Marquer tous les messages d'une conv comme lus
+  socket.on('openedDM', async (otherId) => {
+    const targetId = Number(otherId);
+    try {
+      const unread = await pool.query(
+        `UPDATE messages_prives SET is_read = true 
+       WHERE receveur_id = $1 AND sender_id = $2 AND is_read = false 
+       RETURNING id`,
+        [socket.userId, targetId]
+      );
+      if (unread.rows.length === 0) return;
+      const roomId = 'dm_' + Math.min(socket.userId, targetId) + '_' + Math.max(socket.userId, targetId);
+      io.to(roomId).emit('allDMRead', { readBy: socket.userId });
+    } catch (err) { console.error(err.message); }
+  });
+
+  socket.on('openedGroupe', async (groupeId) => {
+    const id = Number(groupeId);
+    try {
+      const msgs = await pool.query(
+        `SELECT id FROM messages WHERE groupe_id = $1 AND sender_id != $2 AND deleted_at IS NULL`,
+        [id, socket.userId]
+      );
+      for (const m of msgs.rows) {
+        await pool.query(
+          `INSERT INTO message_reads (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [m.id, socket.userId]
+        );
+      }
+      io.to('groupe_' + id).emit('allGroupeRead', { groupeId: id, userId: socket.userId });
+    } catch (err) { console.error(err.message); }
+  });
+
+  // --- RÉACTIONS ---
+
+  socket.on('react', async ({ messageId, emoji, type, groupeId, otherId }) => {
+    try {
+      // Toggle : si même emoji déjà posé par ce user, on supprime
+      const existing = await pool.query(
+        `SELECT id FROM reactions WHERE message_id = $1 AND message_type = $2 AND user_id = $3 AND emoji = $4`,
+        [messageId, type, socket.userId, emoji]
+      );
+      if (existing.rows.length > 0) {
+        await pool.query(`DELETE FROM reactions WHERE id = $1`, [existing.rows[0].id]);
+      } else {
+        await pool.query(
+          `INSERT INTO reactions (message_id, message_type, user_id, emoji)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (message_id, message_type, user_id) DO UPDATE SET emoji = $4, created_at = NOW()`,
+          [messageId, type, socket.userId, emoji]
+        );
+      }
+      const result = await pool.query(
+        `SELECT emoji, COUNT(*) as count, BOOL_OR(user_id = $2) as reacted_by_me
+         FROM reactions WHERE message_id = $1 AND message_type = $3
+         GROUP BY emoji`,
+        [messageId, socket.userId, type]
+      );
+      const payload = { messageId, reactions: result.rows };
+      if (type === 'groupe') {
+        io.to('groupe_' + groupeId).emit('reactionUpdated', payload);
+      } else {
+        const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+        io.to(roomId).emit('reactionUpdated', payload);
+      }
+    } catch (err) { console.error(err.message); }
+  });
+
+  // --- ÉPINGLÉS ---
+
+  socket.on('pinMessage', async ({ messageId, type, conversationKey, groupeId, otherId }) => {
+    try {
+      // Un seul message épinglé par conversation : on remplace
+      await pool.query(
+        `DELETE FROM pinned_messages WHERE conversation_key = $1`, [conversationKey]
+      );
+      await pool.query(
+        `INSERT INTO pinned_messages (message_id, message_type, conversation_key, pinned_by)
+         VALUES ($1, $2, $3, $4)`,
+        [messageId, type, conversationKey, socket.userId]
+      );
+      // Charger le message complet pour l'émettre
+      let msg;
+      if (type === 'groupe') {
+        const r = await pool.query(
+          `SELECT m.*, u.pseudo AS sender FROM messages m
+           JOIN users u ON u.id = m.sender_id WHERE m.id = $1`,
+          [messageId]
+        );
+        msg = r.rows[0];
+      } else {
+        const r = await pool.query(
+          `SELECT mp.*, u.pseudo AS sender FROM messages_prives mp
+           JOIN users u ON u.id = mp.sender_id WHERE mp.id = $1`,
+          [messageId]
+        );
+        msg = r.rows[0];
+      }
+      const payload = { conversationKey, pinnedMsg: msg };
+      if (type === 'groupe') {
+        io.to('groupe_' + groupeId).emit('messagePinned', payload);
+      } else {
+        const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+        io.to(roomId).emit('messagePinned', payload);
+      }
+    } catch (err) { console.error('Erreur pinMessage:', err.message); }
+  });
+
+  socket.on('unpinMessage', async ({ conversationKey, groupeId, otherId, type }) => {
+    try {
+      await pool.query(
+        `DELETE FROM pinned_messages WHERE conversation_key = $1`, [conversationKey]
+      );
+      const payload = { conversationKey };
+      if (type === 'groupe') {
+        io.to('groupe_' + groupeId).emit('messageUnpinned', payload);
+      } else {
+        const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+        io.to(roomId).emit('messageUnpinned', payload);
+      }
+    } catch (err) { console.error('Erreur unpinMessage:', err.message); }
+  });
+
+  // --- TYPING ---
+
+  socket.on('typing', ({ groupeId }) => {
+    socket.to('groupe_' + groupeId).emit('userTyping', { userId: socket.userId });
+  });
+  socket.on('stopTyping', ({ groupeId }) => {
+    socket.to('groupe_' + groupeId).emit('userStopTyping', { userId: socket.userId });
+  });
+  socket.on('typingDM', ({ otherId }) => {
+    const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+    socket.to(roomId).emit('userTypingDM', { userId: socket.userId });
+  });
+  socket.on('stopTypingDM', ({ otherId }) => {
+    const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
+    socket.to(roomId).emit('userStopTypingDM', { userId: socket.userId });
   });
 
   socket.on('disconnect', () => {
-    console.log(`Socket déconnecté : userId=${socket.userId}`);
-  });
-
-  // ─── DM ───────────────────────────────────────────────────────────────────
-
-  // Rejoindre la room DM avec un ami
-  socket.on('joinDM', async (otherId) => {
-    const result = await pool.query(
-      `SELECT 1 FROM friendships
-       WHERE statut = 'accepted'
-         AND (
-           (demandeur_id = $1 AND receveur_id = $2)
-           OR (demandeur_id = $2 AND receveur_id = $1)
-         )`,
-      [socket.userId, otherId]
-    );
-    if (result.rows.length === 0) {
-      return socket.emit('error', 'Vous n\'êtes pas amis');
-    }
-    const roomId = `dm_${Math.min(socket.userId, otherId)}_${Math.max(socket.userId, otherId)}`;
-    socket.join(roomId);
-    console.log(`userId=${socket.userId} a rejoint la room ${roomId}`);
-  });
-
-  // Quitter la room DM
-  socket.on('leaveDM', (otherId) => {
-    const roomId = `dm_${Math.min(socket.userId, otherId)}_${Math.max(socket.userId, otherId)}`;
-    socket.leave(roomId);
-  });
-
-  // Envoyer un message privé
-  socket.on('sendPrivateMessage', async ({ receveurId, contenu }) => {
-    if (!contenu || contenu.trim() === '') {
-      return socket.emit('error', 'Le contenu du message est requis');
-    }
-
-    const friendship = await pool.query(
-      `SELECT 1 FROM friendships
-       WHERE statut = 'accepted'
-         AND (
-           (demandeur_id = $1 AND receveur_id = $2)
-           OR (demandeur_id = $2 AND receveur_id = $1)
-         )`,
-      [socket.userId, receveurId]
-    );
-    if (friendship.rows.length === 0) {
-      return socket.emit('error', 'Vous n\'êtes pas amis');
-    }
-
-    const result = await pool.query(
-      `INSERT INTO messages_prives (contenu, sender_id, receveur_id)
-       VALUES ($1, $2, $3)
-       RETURNING id, contenu, created_at`,
-      [contenu.trim(), socket.userId, receveurId]
-    );
-    const message = result.rows[0];
-
-    const user = await pool.query('SELECT pseudo FROM users WHERE id = $1', [socket.userId]);
-
-    const payload = {
-      ...message,
-      sender: user.rows[0].pseudo,
-      receveur_id: receveurId
-    };
-
-    const roomId = `dm_${Math.min(socket.userId, receveurId)}_${Math.max(socket.userId, receveurId)}`;
-    io.to(roomId).emit('newPrivateMessage', payload);
+    onlineUsers.delete(socket.userId);
+    io.emit('userOffline', socket.userId);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Serveur lancé sur le port ${PORT}`));
+server.listen(PORT, () => console.log('Serveur lancé sur http://localhost:' + PORT));

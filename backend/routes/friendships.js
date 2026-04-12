@@ -3,6 +3,8 @@ const router = express.Router();
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
 
+let _io = null; // Variable pour stocker l'instance io
+
 router.use(authMiddleware);
 
 // POST /friendships/:id — envoyer une demande d'ami
@@ -69,7 +71,7 @@ router.patch('/:id/accepter', async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE friendships
-       SET statut = 'accepted'
+       SET statut = 'accepted', accepted_at = NOW()
        WHERE id = $1 AND receveur_id = $2 AND statut = 'pending'
        RETURNING id, statut`,
       [friendshipId, req.userId]
@@ -81,4 +83,58 @@ router.patch('/:id/accepter', async (req, res) => {
   }
 });
 
-module.exports = router;
+// Demandes envoyées en attente
+router.get('/pending', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT f.id, f.receveur_id, u.pseudo, u.avatar_url
+       FROM friendships f
+       JOIN users u ON u.id = f.receveur_id
+       WHERE f.demandeur_id = $1 AND f.statut = 'pending'`,
+      [req.userId]
+    );
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// Supprimer un ami (par user_id de l'ami)
+router.delete('/:id', authMiddleware, async (req, res) => {
+  const friendId = parseInt(req.params.id);
+  try {
+    const result = await pool.query(
+      `DELETE FROM friendships
+       WHERE statut = 'accepted'
+         AND ((demandeur_id = $1 AND receveur_id = $2) OR (demandeur_id = $2 AND receveur_id = $1))
+       RETURNING id`,
+      [req.userId, friendId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Amitié introuvable' });
+
+    // Notifier les deux côtés via socket si io est dispo
+    if (_io) {
+      _io.emit('friendRemoved', { userId: req.userId, friendId });
+    }
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// Annuler une demande envoyée
+router.delete('/:id/cancel', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM friendships 
+       WHERE id = $1 AND demandeur_id = $2 AND statut = 'pending'
+       RETURNING id`,
+      [req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Demande introuvable' });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// Export sous forme de factory
+module.exports = (io) => {
+  _io = io;
+  return router;
+};

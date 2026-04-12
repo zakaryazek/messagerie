@@ -3,70 +3,97 @@ const router = express.Router({ mergeParams: true });
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
 
-// routes protégées
 router.use(authMiddleware);
 
-// vérifie que l'utilisateur est membre du groupe
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
+function fullUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  return API_BASE + url;
+}
+
 async function checkMembership(req, res, next) {
   const groupeId = parseInt(req.params.id);
+  if (isNaN(groupeId)) return next();
   try {
     const result = await pool.query(
       'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
       [groupeId, req.userId]
     );
-    if (result.rows.length === 0) return res.status(403).json({ error: 'Vous n\'êtes pas membre de ce groupe' });
+    if (result.rows.length === 0) return res.status(403).json({ error: 'Non membre' });
     next();
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 }
 
-// POST /groupes/:id/messages
-// envoyer un message
-router.post('/', checkMembership, async (req, res) => {
-  const groupeId = parseInt(req.params.id);
-  const { contenu } = req.body;
-  if (!contenu || contenu.trim() === '') return res.status(400).json({ error: 'Le contenu du message est requis' });
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO messages (contenu, sender_id, groupe_id)
-       VALUES ($1, $2, $3)
-       RETURNING id, contenu, created_at`,
-      [contenu.trim(), req.userId, groupeId]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// GET /groupes/:id/messages
-// historique des messages
+// GET / — Historique avec réactions
 router.get('/', checkMembership, async (req, res) => {
   const groupeId = parseInt(req.params.id);
-  const limit = parseInt(req.query.limit) || 50;
-  const offset = parseInt(req.query.offset) || 0;
-
   try {
     const result = await pool.query(
-      `SELECT
-         m.id,
-         m.contenu,
-         m.created_at,
-         m.is_read,
-         u.pseudo AS sender
+      `SELECT m.*, u.pseudo AS sender,
+        COALESCE(
+          json_agg(
+            json_build_object('emoji', r.emoji, 'count', r.cnt, 'reacted_by_me', r.reacted_by_me)
+          ) FILTER (WHERE r.emoji IS NOT NULL),
+          '[]'
+        ) AS reactions
        FROM messages m
        JOIN users u ON u.id = m.sender_id
-       WHERE m.groupe_id = $1
-       ORDER BY m.created_at ASC
-       LIMIT $2 OFFSET $3`,
-      [groupeId, limit, offset]
+       LEFT JOIN (
+         SELECT message_id, emoji, COUNT(*) as cnt,
+                BOOL_OR(user_id = $2) as reacted_by_me
+         FROM reactions WHERE message_type = 'groupe'
+         GROUP BY message_id, emoji
+       ) r ON r.message_id = m.id
+       WHERE m.groupe_id = $1 AND m.deleted_at IS NULL
+       GROUP BY m.id, u.pseudo
+       ORDER BY m.created_at ASC`,
+      [groupeId, req.userId]
     );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+    const rows = result.rows.map(m => ({ ...m, attachment_url: fullUrl(m.attachment_url) }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /attachments
+router.get('/attachments', async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT id, attachment_url FROM messages
+       WHERE groupe_id = $1 AND attachment_url IS NOT NULL AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [groupeId]
+    );
+    const rows = result.rows.map(m => ({ ...m, attachment_url: fullUrl(m.attachment_url) }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// PATCH /:msgId
+router.patch('/:msgId', async (req, res) => {
+  const { contenu } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE messages SET contenu = $1, edited_at = NOW()
+       WHERE id = $2 AND sender_id = $3 AND deleted_at IS NULL RETURNING *`,
+      [contenu, req.params.msgId, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(403).json({ error: 'Non autorisé' });
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: 'Erreur edit' }); }
+});
+
+// DELETE /:msgId
+router.delete('/:msgId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE messages SET deleted_at = NOW() WHERE id = $1 AND sender_id = $2 RETURNING id`,
+      [req.params.msgId, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(403).json({ error: 'Non autorisé' });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Erreur delete' }); }
 });
 
 module.exports = router;

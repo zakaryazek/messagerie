@@ -1,0 +1,315 @@
+import { useEffect, useState, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
+import AccountModal from './AccountModal';
+import SettingsPanel from './SettingsPanel';
+import socket from '../socket';
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+export default function Sidebar({ activeConversation, onSelectConversation }) {
+  const { token, pseudo, userId, avatarUrl, onlineUsers } = useAuth();
+  
+  // États Modification A
+  const [me, setMe] = useState(null);
+  const [showAccount, setShowAccount] = useState(false);
+
+  // États Modification B
+  const [conversations, setConversations] = useState([]);
+  const [activeTab, setActiveTab] = useState('discussions'); // 'discussions' | 'amis'
+  const [search, setSearch] = useState('');
+
+  // États Modification C (Plus Menu & Groupes)
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showCreateGroupe, setShowCreateGroupe] = useState(false);
+  const [showNewDM, setShowNewDM] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [selectedFriends, setSelectedFriends] = useState([]);
+
+  // États Amis
+  const [amis, setAmis] = useState([]);
+  const [demandes, setDemandes] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [friendsTab, setFriendsTab] = useState('amis'); // 'amis' | 'attente'
+  const [userSearch, setUserSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchMsg, setSearchMsg] = useState('');
+
+  const [showSettings, setShowSettings] = useState(false);
+
+  // --- Initialisation & Fetch ---
+
+  useEffect(() => {
+    // A) Fetch profil perso
+    fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(setMe);
+
+    fetchDiscussions();
+    fetchAmis();
+  }, [token]);
+
+  async function fetchDiscussions() {
+    const res = await fetch(`${API}/conversations`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (Array.isArray(data)) setConversations(data);
+  }
+
+  async function fetchAmis() {
+    const res = await fetch(`${API}/friendships`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    setAmis(data.amis || []);
+    setDemandes(data.demandes || []);
+  }
+
+  async function fetchPending() {
+    const res = await fetch(`${API}/friendships/pending`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (Array.isArray(data)) setPendingRequests(data);
+  }
+
+  useEffect(() => {
+    if (activeTab === 'amis' && friendsTab === 'attente') fetchPending();
+  }, [activeTab, friendsTab]);
+
+  useEffect(() => {
+    socket.on('newMessage', fetchDiscussions);
+    socket.on('newPrivateMessage', fetchDiscussions);
+    socket.on('friendRemoved', fetchAmis);
+    socket.on('friendRemoved', fetchDiscussions);
+    return () => {
+      socket.off('newMessage');
+      socket.off('newPrivateMessage');
+      socket.off('friendRemoved');
+    };
+  }, []);
+
+  // --- Actions Modification C ---
+
+  async function createGroupe() {
+    if (!newGroupName.trim()) return;
+    await fetch(`${API}/groupes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ nom: newGroupName, members: selectedFriends })
+    });
+    setShowCreateGroupe(false);
+    setNewGroupName('');
+    setSelectedFriends([]);
+    fetchDiscussions();
+  }
+
+  // --- Autres Actions (Amis) ---
+
+  async function acceptDemande(id) {
+    await fetch(`${API}/friendships/${id}/accepter`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${token}` }
+    });
+    fetchAmis(); fetchDiscussions();
+  }
+
+  async function searchUsers(e) {
+    e.preventDefault();
+    if (!userSearch.trim()) return;
+    const res = await fetch(`${API}/users?search=${encodeURIComponent(userSearch)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    setSearchResults(await res.json());
+  }
+
+  async function addFriend(userId) {
+    await fetch(`${API}/friendships/${userId}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }
+    });
+    setSearchMsg('Demande envoyée !');
+    setSearchResults([]); setUserSearch('');
+    fetchPending();
+  }
+
+  // --- Rendu ---
+
+  const filteredConversations = conversations.filter(c =>
+    c.name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (showSettings) return <SettingsPanel onClose={() => setShowSettings(false)} />;
+
+  return (
+    <div className="w-80 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col h-full relative">
+      
+      {/* Modification A: Header avec Avatar */}
+      <div className="px-4 py-4 border-b border-gray-800">
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-white font-bold text-lg">ChatApp</h1>
+          <button onClick={() => setShowAccount(true)} className="relative group">
+            <img
+              src={avatarUrl || '/default-avatar.png'}
+              className="w-9 h-9 rounded-full object-cover border-2 border-gray-600 hover:border-blue-500 transition-colors"
+              alt="Profil"
+            />
+            {onlineUsers.has(userId) && (
+               <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
+            )}
+          </button>
+        </div>
+        <input
+          className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Rechercher..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      {/* Modification B: Onglets Simplifiés */}
+      <div className="flex border-b border-gray-700">
+        {[['discussions', 'Discussions'], ['amis', 'Amis']].map(([v, l]) => (
+          <button key={v} onClick={() => setActiveTab(v)}
+            className={`flex-1 py-2 text-sm font-medium transition-colors ${activeTab === v ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-gray-200'}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {activeTab === 'discussions' && (
+          <div>
+            {/* Modification C: Bouton Plus */}
+            <div className="flex justify-between items-center px-4 py-3">
+              <span className="text-gray-400 text-xs uppercase font-bold tracking-wider">Messages</span>
+              <div className="relative">
+                <button onClick={() => setShowPlusMenu(p => !p)}
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-white text-lg transition-colors">
+                  +
+                </button>
+                {showPlusMenu && (
+                  <div className="absolute right-0 top-8 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 w-44 overflow-hidden">
+                    <button onClick={() => { setShowPlusMenu(false); setShowCreateGroupe(true); }}
+                      className="w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700">
+                      Créer un groupe
+                    </button>
+                    <button onClick={() => { setShowPlusMenu(false); setShowNewDM(true); }}
+                      className="w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700">
+                      Nouvelle discussion
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {filteredConversations.map(conv => (
+              <button
+                key={`${conv.type}-${conv.id}`}
+                onClick={() => onSelectConversation(conv)}
+                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors text-left ${
+                  activeConversation?.id === conv.id ? 'bg-gray-800' : ''
+                }`}
+              >
+                <div className="relative flex-shrink-0">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${conv.type === 'group' ? 'bg-purple-600' : 'bg-blue-600'}`}>
+                    {conv.type === 'group' ? '#' : (conv.name || '?').slice(0,1).toUpperCase()}
+                  </div>
+                  {conv.type === 'dm' && onlineUsers.has(Number(conv.id)) && (
+                    <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between">
+                    <span className="text-white text-sm font-semibold truncate">{conv.name}</span>
+                    <span className="text-gray-500 text-xs">{conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  </div>
+                  <p className="text-gray-500 text-xs truncate">{conv.last_message || 'Aucun message'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Section Amis (Logique existante adaptée) */}
+        {activeTab === 'amis' && (
+          <div className="p-4 space-y-4">
+             <form onSubmit={searchUsers} className="flex gap-2">
+              <input className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none"
+                placeholder="Chercher un utilisateur..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
+              <button className="bg-blue-600 p-2 rounded-lg">🔍</button>
+            </form>
+
+            <div className="flex border-b border-gray-800">
+                <button onClick={() => setFriendsTab('amis')} className={`flex-1 py-1 text-xs ${friendsTab === 'amis' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Amis</button>
+                <button onClick={() => setFriendsTab('attente')} className={`flex-1 py-1 text-xs ${friendsTab === 'attente' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Attente</button>
+            </div>
+
+            {friendsTab === 'amis' && amis.map(a => (
+               <button key={a.user_id} onClick={() => onSelectConversation({type: 'dm', id: a.user_id, name: a.pseudo})}
+                className="w-full flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg transition-colors">
+                 <img src={a.avatar_url || '/default-avatar.png'} className="w-8 h-8 rounded-full" />
+                 <span className="text-white text-sm">{a.pseudo}</span>
+               </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* MODAUX MODIFICATION C */}
+      {showCreateGroupe && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl p-5 w-full max-w-sm space-y-3 border border-gray-700">
+            <h3 className="text-white font-semibold">Créer un groupe</h3>
+            <input placeholder="Nom du groupe" value={newGroupName}
+              onChange={e => setNewGroupName(e.target.value)}
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-700 focus:border-blue-500" />
+            <p className="text-gray-400 text-xs font-bold uppercase">Ajouter des amis :</p>
+            <div className="max-h-40 overflow-y-auto space-y-2">
+              {amis.map(f => (
+                <label key={f.user_id} className="flex items-center justify-between p-2 hover:bg-gray-800 rounded cursor-pointer">
+                  <span className="text-white text-sm">{f.pseudo}</span>
+                  <input type="checkbox" checked={selectedFriends.includes(f.user_id)}
+                    onChange={e => setSelectedFriends(prev =>
+                      e.target.checked ? [...prev, f.user_id] : prev.filter(id => id !== f.user_id)
+                    )} className="w-4 h-4 accent-blue-500" />
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setShowCreateGroupe(false)}
+                className="flex-1 py-2 text-sm text-gray-400 bg-gray-800 rounded-lg hover:bg-gray-700">Annuler</button>
+              <button onClick={createGroupe}
+                className="flex-1 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500">Créer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewDM && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl p-5 w-full max-w-sm space-y-3 border border-gray-700">
+            <h3 className="text-white font-semibold">Nouvelle discussion</h3>
+            <p className="text-gray-400 text-xs font-bold uppercase">Choisir un ami :</p>
+            <div className="max-h-60 overflow-y-auto">
+              {amis.map(f => (
+                <button key={f.user_id}
+                  onClick={() => { onSelectConversation({ type: 'dm', id: f.user_id, name: f.pseudo }); setShowNewDM(false); }}
+                  className="w-full text-left flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors">
+                  <div className="relative">
+                    <img src={f.avatar_url || '/default-avatar.png'} className="w-10 h-10 rounded-full object-cover" />
+                    {onlineUsers.has(f.user_id) && (
+                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
+                    )}
+                  </div>
+                  <span className="text-white text-sm font-medium">{f.pseudo}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowNewDM(false)}
+              className="w-full py-2 text-sm text-gray-400 bg-gray-800 rounded-lg hover:bg-gray-700">Fermer</button>
+          </div>
+        </div>
+      )}
+
+      {showAccount && <AccountModal onClose={() => setShowAccount(false)} onOpenSettings={() => {setShowAccount(false); setShowSettings(true);}} />}
+    </div>
+  );
+}
