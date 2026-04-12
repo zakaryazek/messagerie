@@ -1,10 +1,123 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import socket from '../socket';
 import MessageItem from './MessageItem';
 import ConversationSettings from './ConversationSettings';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+
+// ─── Animated backgrounds ────────────────────────────────────────────────────
+function AnimatedBackground({ type }) {
+  const stars = useMemo(() =>
+    Array.from({ length: 160 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 2.5 + 0.4,
+      dur: (Math.random() * 3 + 1.5).toFixed(1),
+      delay: (Math.random() * 5).toFixed(1),
+      bright: Math.random() > 0.85,
+    })), []);
+
+  const bubbles = useMemo(() =>
+    Array.from({ length: 14 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 88 + 6,
+      size: Math.floor(Math.random() * 70 + 18),
+      dur: (Math.random() * 9 + 7).toFixed(1),
+      delay: (Math.random() * 9).toFixed(1),
+      hue: Math.floor(Math.random() * 360),
+    })), []);
+
+  const style = (extra) => ({
+    position: 'absolute', inset: 0, pointerEvents: 'none', ...extra,
+  });
+
+  if (type === 'galaxy') return (
+    <div style={style({ background: 'radial-gradient(ellipse at 40% 60%, #0d1b2a 0%, #000008 100%)' })}>
+      <style>{`
+        @keyframes twinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.1;transform:scale(.4)}}
+      `}</style>
+      {stars.map(s => (
+        <div key={s.id} style={{
+          position: 'absolute', left: s.x + '%', top: s.y + '%',
+          width: s.size + 'px', height: s.size + 'px',
+          background: s.bright ? 'rgba(180,210,255,0.95)' : 'white',
+          borderRadius: '50%',
+          boxShadow: s.size > 1.8 ? `0 0 ${s.size * 3}px ${s.size}px rgba(140,190,255,.45)` : 'none',
+          animation: `twinkle ${s.dur}s ${s.delay}s infinite ease-in-out`,
+        }} />
+      ))}
+      <div style={style({ background: 'radial-gradient(ellipse at 30% 55%, rgba(70,40,120,.35) 0%, transparent 60%)' })} />
+      <div style={style({ background: 'radial-gradient(ellipse at 70% 40%, rgba(20,60,100,.25) 0%, transparent 50%)' })} />
+    </div>
+  );
+
+  if (type === 'aurora') return (
+    <div style={style({ background: '#0b0f14' })}>
+      <style>{`
+        @keyframes a1{0%,100%{transform:translateX(-8%) scaleY(1) rotate(-2deg);opacity:.55}50%{transform:translateX(8%) scaleY(1.4) rotate(2deg);opacity:.85}}
+        @keyframes a2{0%,100%{transform:translateX(6%) scaleY(1.1) rotate(1deg);opacity:.4}50%{transform:translateX(-9%) scaleY(.85) rotate(-2deg);opacity:.75}}
+        @keyframes a3{0%,100%{transform:translateX(-4%) scaleY(.9);opacity:.35}50%{transform:translateX(10%) scaleY(1.5);opacity:.65}}
+      `}</style>
+      {[
+        { bg: '#00e57655', top: '12%', h: '38%', anim: 'a1 9s ease-in-out infinite' },
+        { bg: '#7c3aed66', top: '22%', h: '32%', anim: 'a2 11s ease-in-out infinite' },
+        { bg: '#0ea5e955', top: '16%', h: '28%', anim: 'a3 13s ease-in-out infinite' },
+        { bg: '#10b98133', top: '28%', h: '22%', anim: 'a1 7s 2s ease-in-out infinite' },
+      ].map((l, i) => (
+        <div key={i} style={{
+          position: 'absolute', left: '-20%', top: l.top, width: '140%', height: l.h,
+          background: `linear-gradient(180deg, transparent, ${l.bg}, transparent)`,
+          filter: 'blur(28px)', borderRadius: '50%', animation: l.anim,
+        }} />
+      ))}
+    </div>
+  );
+
+  if (type === 'bubbles') return (
+    <div style={style({ background: '#0f172a' })}>
+      <style>{`@keyframes floatUp{0%{transform:translateY(105vh) scale(.4);opacity:0}8%{opacity:.5}88%{opacity:.25}100%{transform:translateY(-15vh) scale(1.3);opacity:0}}`}</style>
+      {bubbles.map(b => (
+        <div key={b.id} style={{
+          position: 'absolute', left: b.x + '%', bottom: '-5%',
+          width: b.size + 'px', height: b.size + 'px', borderRadius: '50%',
+          background: `hsla(${b.hue},65%,65%,.12)`,
+          border: `1.5px solid hsla(${b.hue},65%,75%,.28)`,
+          animation: `floatUp ${b.dur}s ${b.delay}s infinite linear`,
+          backdropFilter: 'blur(3px)',
+        }} />
+      ))}
+    </div>
+  );
+
+  if (type === 'waves') return (
+    <div style={style({})}>
+      <style>{`@keyframes waveShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}`}</style>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(270deg,#1e3a5f,#7c3aed,#0f172a,#0e7490,#1e3a5f)',
+        backgroundSize: '400% 400%',
+        animation: 'waveShift 10s ease infinite',
+      }} />
+    </div>
+  );
+
+  if (type === 'sunset') return (
+    <div style={style({})}>
+      <style>{`@keyframes sunsetShift{0%{background-position:0% 0%}50%{background-position:100% 100%}100%{background-position:0% 0%}}`}</style>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(135deg,#ff6b6b,#feca57,#ff9ff3,#54a0ff,#5f27cd)',
+        backgroundSize: '300% 300%',
+        animation: 'sunsetShift 8s ease infinite',
+      }} />
+    </div>
+  );
+
+  return null;
+}
 
 export default function ChatPanel({ conversation, onGroupDeleted }) {
   const { token, pseudo, userId } = useAuth();
@@ -309,7 +422,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
   );
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-950 min-w-0 relative">
+    <div className={`flex-1 flex flex-col min-w-0 relative ${chatBackground?.startsWith('animated:') ? '' : 'bg-gray-950'}`}>
       <div className="px-5 py-4 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10">
         <div className="flex items-center gap-3">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold ${isGroup ? 'bg-purple-600' : 'bg-indigo-600'}`}>
@@ -351,7 +464,13 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 flex flex-col" style={chatBackground ? { background: chatBackground } : undefined}>
+      {chatBackground?.startsWith('animated:') && (
+        <div className="absolute inset-0 overflow-hidden z-0 pointer-events-none">
+          <AnimatedBackground type={chatBackground.replace('animated:', '')} />
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 flex flex-col relative z-10"
+        style={chatBackground && !chatBackground.startsWith('animated:') ? { background: chatBackground } : undefined}>
         {messages.map(msg => (
           <MessageItem
             key={msg.id}
@@ -376,7 +495,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="bg-gray-900 border-t border-gray-800 p-4">
+      <div className="bg-gray-900 border-t border-gray-800 p-4 relative z-10">
         {(replyTo || editingMsg) && (
           <div className="mb-3 bg-gray-800 rounded-lg p-3 flex justify-between items-center border-l-4 border-indigo-500">
             <div className="truncate">

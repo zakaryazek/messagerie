@@ -9,14 +9,54 @@ const BUBBLE_COLORS = [
 ];
 
 const BACKGROUNDS = [
-  { label: 'Défaut', value: 'default' },
-  { label: 'Gris foncé', value: '#1F2937' },
-  { label: 'Bleu nuit', value: '#0F172A' },
-  { label: 'Violet', value: '#2E1065' },
-  { label: 'Vert forêt', value: '#052E16' },
-  { label: 'Dégradé bleu', value: 'linear-gradient(135deg,#1e3a5f,#0f172a)' },
-  { label: 'Dégradé violet', value: 'linear-gradient(135deg,#2e1065,#1e1b4b)' },
-  { label: 'Dégradé vert', value: 'linear-gradient(135deg,#052e16,#0f172a)' },
+  { label: 'Défaut', value: 'default', group: 'default' },
+
+  // Clair · Couleurs
+  { label: 'Bleu clair',    value: '#BFDBFE', group: 'clair-fixe' },
+  { label: 'Vert clair',    value: '#BBF7D0', group: 'clair-fixe' },
+  { label: 'Rose',          value: '#FBCFE8', group: 'clair-fixe' },
+  { label: 'Jaune',         value: '#FDE68A', group: 'clair-fixe' },
+  { label: 'Violet clair',  value: '#DDD6FE', group: 'clair-fixe' },
+  { label: 'Pêche',         value: '#FED7AA', group: 'clair-fixe' },
+  { label: 'Turquoise',     value: '#99F6E4', group: 'clair-fixe' },
+  { label: 'Rouge pâle',    value: '#FECACA', group: 'clair-fixe' },
+
+  // Clair · Dégradés
+  { label: 'Aurore',         value: 'linear-gradient(135deg,#fce4ec,#e3f2fd)',          group: 'clair-deg' },
+  { label: 'Printemps',      value: 'linear-gradient(135deg,#d1fae5,#e0f2fe)',           group: 'clair-deg' },
+  { label: 'Coucher soleil', value: 'linear-gradient(135deg,#fff3e0,#fce4ec)',           group: 'clair-deg' },
+  { label: 'Coton candy',    value: 'linear-gradient(135deg,#fce4ec,#f3e5f5)',           group: 'clair-deg' },
+  { label: 'Miel',           value: 'linear-gradient(135deg,#fffde7,#fff3e0)',           group: 'clair-deg' },
+  { label: 'Ciel matin',     value: 'linear-gradient(180deg,#e0f2fe,#f0fdf4)',           group: 'clair-deg' },
+  { label: 'Brume lilas',    value: 'linear-gradient(135deg,#ede9fe,#fce7f3)',           group: 'clair-deg' },
+  { label: 'Aquarelle',      value: 'linear-gradient(135deg,#e0f2fe,#ede9fe,#fce7f3)',  group: 'clair-deg' },
+
+  // Sombre · Couleurs
+  { label: 'Gris foncé',   value: '#1F2937', group: 'sombre-fixe' },
+  { label: 'Bleu nuit',    value: '#0F172A', group: 'sombre-fixe' },
+  { label: 'Violet',       value: '#2E1065', group: 'sombre-fixe' },
+  { label: 'Vert forêt',   value: '#052E16', group: 'sombre-fixe' },
+  { label: 'Bordeaux',     value: '#3B0A0A', group: 'sombre-fixe' },
+  { label: 'Ardoise',      value: '#0F1923', group: 'sombre-fixe' },
+  { label: 'Anthracite',   value: '#18181B', group: 'sombre-fixe' },
+  { label: 'Chocolat',     value: '#1C1008', group: 'sombre-fixe' },
+
+  // Sombre · Dégradés
+  { label: 'Océan nuit',    value: 'linear-gradient(135deg,#1e3a5f,#0f172a)',             group: 'sombre-deg' },
+  { label: 'Cosmos',        value: 'linear-gradient(135deg,#2e1065,#1e1b4b)',             group: 'sombre-deg' },
+  { label: 'Jungle',        value: 'linear-gradient(135deg,#052e16,#0f172a)',             group: 'sombre-deg' },
+  { label: 'Aurore boréale',value: 'linear-gradient(135deg,#042f2e,#0e7490,#1e1b4b)',    group: 'sombre-deg' },
+  { label: 'Feu & braise',  value: 'linear-gradient(135deg,#1c0a0a,#7c2d12,#1c0a0a)',   group: 'sombre-deg' },
+  { label: 'Galaxie',       value: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)',    group: 'sombre-deg' },
+  { label: 'Crépuscule',    value: 'linear-gradient(160deg,#1a1a2e,#16213e,#0f3460)',    group: 'sombre-deg' },
+  { label: 'Forêt noire',   value: 'linear-gradient(135deg,#0a0a0a,#1a2a1a)',            group: 'sombre-deg' },
+
+  // Animés
+  { label: 'Galaxie ✨', value: 'animated:galaxy',  group: 'anim', icon: '🌌', preview: 'radial-gradient(ellipse,#1a2a4a,#000005)' },
+  { label: 'Aurore 🌟',  value: 'animated:aurora',  group: 'anim', icon: '🌟', preview: 'linear-gradient(135deg,#042f2e,#0d1117)' },
+  { label: 'Bulles 🫧',  value: 'animated:bubbles', group: 'anim', icon: '🫧', preview: 'linear-gradient(135deg,#0f172a,#1e3a5f)' },
+  { label: 'Vagues 🌊',  value: 'animated:waves',   group: 'anim', icon: '🌊', preview: 'linear-gradient(135deg,#1e3a5f,#7c3aed,#0e7490)' },
+  { label: 'Coucher 🌅', value: 'animated:sunset',  group: 'anim', icon: '🌅', preview: 'linear-gradient(135deg,#ff6b6b,#feca57,#ff9ff3)' },
 ];
 
 export default function ConversationSettings({ conversation, currentUserId, onClose, onDeleted, onLeft }) {
@@ -275,17 +315,69 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
 
           {/* FOND */}
           {tab === 'fond' && (
-            <div className="space-y-2">
-              <p className="text-gray-400 text-xs mb-3">Fond de la conversation</p>
-              {BACKGROUNDS.map(bg => (
-                <button key={bg.value} onClick={() => saveBackground(bg.value)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-sm transition
-                    ${background === bg.value ? 'border-blue-500 text-white' : 'border-gray-700 text-gray-300 hover:border-gray-500'}`}>
-                  <span className="w-6 h-6 rounded-full border border-gray-600 flex-shrink-0"
-                    style={{ background: bg.value === 'default' ? '#111827' : bg.value }} />
-                  {bg.label}
-                </button>
-              ))}
+            <div className="space-y-5">
+
+              {/* Helper to render a grid of bg swatches */}
+              {[
+                { key: 'default',     title: null },
+                { key: 'clair-fixe',  title: 'Clair — couleurs' },
+                { key: 'clair-deg',   title: 'Clair — dégradés' },
+                { key: 'sombre-fixe', title: 'Sombre — couleurs' },
+                { key: 'sombre-deg',  title: 'Sombre — dégradés' },
+              ].map(({ key, title }) => {
+                const items = BACKGROUNDS.filter(b => b.group === key);
+                if (!items.length) return null;
+                return (
+                  <div key={key}>
+                    {title && (
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">{title}</p>
+                    )}
+                    <div className="grid grid-cols-4 gap-x-2 gap-y-3">
+                      {items.map(bg => (
+                        <div key={bg.value} className="flex flex-col items-center gap-1">
+                          <button
+                            onClick={() => saveBackground(bg.value)}
+                            title={bg.label}
+                            className={`w-full h-10 rounded-lg border-2 transition-all hover:scale-105 relative overflow-hidden
+                              ${background === bg.value ? 'border-blue-400 ring-1 ring-blue-400 scale-105' : 'border-gray-700 hover:border-gray-500'}`}
+                            style={{ background: bg.value === 'default' ? '#111827' : bg.value }}
+                          >
+                            {background === bg.value && (
+                              <span className="absolute inset-0 flex items-center justify-center font-bold text-white drop-shadow text-sm">✓</span>
+                            )}
+                          </button>
+                          <span className="text-[9px] text-gray-500 text-center leading-tight w-full" style={{ wordBreak: 'break-word' }}>{bg.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Animés */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">✨ Animés</p>
+                <div className="grid grid-cols-4 gap-x-2 gap-y-3">
+                  {BACKGROUNDS.filter(b => b.group === 'anim').map(bg => (
+                    <div key={bg.value} className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => saveBackground(bg.value)}
+                        title={bg.label}
+                        className={`w-full h-10 rounded-lg border-2 transition-all hover:scale-105 relative overflow-hidden
+                          ${background === bg.value ? 'border-blue-400 ring-1 ring-blue-400 scale-105' : 'border-gray-700 hover:border-gray-500'}`}
+                        style={{ background: bg.preview }}
+                      >
+                        <span className="absolute inset-0 flex items-center justify-center text-lg">{bg.icon}</span>
+                        {background === bg.value && (
+                          <span className="absolute top-0.5 right-1 text-white text-[10px] font-bold drop-shadow">✓</span>
+                        )}
+                      </button>
+                      <span className="text-[9px] text-gray-500 text-center leading-tight w-full" style={{ wordBreak: 'break-word' }}>{bg.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
           )}
 
