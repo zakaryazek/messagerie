@@ -6,6 +6,26 @@ import socket from '../socket';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+function TypingDots() {
+  return (
+    <span className="flex items-center gap-0.5 h-4">
+      <style>{`
+        @keyframes typingBounce {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+          30% { transform: translateY(-4px); opacity: 1; }
+        }
+        .typing-dot { width: 5px; height: 5px; border-radius: 50%; background: #6B7280;
+          animation: typingBounce 1.2s infinite; display: inline-block; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+      `}</style>
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </span>
+  );
+}
+
 export default function Sidebar({ activeConversation, onSelectConversation, refreshTrigger = 0 }) {
   const { token, pseudo, userId, avatarUrl, onlineUsers } = useAuth();
 
@@ -35,6 +55,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
   const [searchMsg, setSearchMsg] = useState('');
 
   const [showSettings, setShowSettings] = useState(false);
+  const [typingConvs, setTypingConvs] = useState({}); // { 'group-12': timeoutId, 'dm-5': timeoutId }
 
   // --- Initialisation & Fetch ---
 
@@ -97,6 +118,25 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
     socket.on('conversationListUpdated', fetchDiscussions);
     socket.on('groupeDeleted', fetchDiscussions);
     socket.on('groupeLeft', fetchDiscussions);
+
+    socket.on('sidebarTyping', ({ type, id }) => {
+      const key = `${type}-${id}`;
+      setTypingConvs(prev => {
+        if (prev[key]) clearTimeout(prev[key]);
+        const timeout = setTimeout(() => {
+          setTypingConvs(p => { const n = { ...p }; delete n[key]; return n; });
+        }, 4000);
+        return { ...prev, [key]: timeout };
+      });
+    });
+    socket.on('sidebarStopTyping', ({ type, id }) => {
+      const key = `${type}-${id}`;
+      setTypingConvs(prev => {
+        if (prev[key]) clearTimeout(prev[key]);
+        const n = { ...prev }; delete n[key]; return n;
+      });
+    });
+
     return () => {
       socket.off('newMessage', delayedFetch);
       socket.off('newPrivateMessage', delayedFetch);
@@ -106,6 +146,8 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
       socket.off('conversationListUpdated');
       socket.off('groupeDeleted');
       socket.off('groupeLeft');
+      socket.off('sidebarTyping');
+      socket.off('sidebarStopTyping');
     };
   }, []);
 
@@ -241,7 +283,10 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
                     <span className="text-white text-sm font-semibold truncate">{conv.name}</span>
                     <span className="text-gray-500 text-xs">{conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
-                  <p className="text-gray-500 text-xs truncate">{conv.last_message || 'Aucun message'}</p>
+                  {typingConvs[`${conv.type}-${conv.id}`]
+                    ? <TypingDots />
+                    : <p className="text-gray-500 text-xs truncate">{conv.last_message || 'Aucun message'}</p>
+                  }
                 </div>
               </button>
             ))}

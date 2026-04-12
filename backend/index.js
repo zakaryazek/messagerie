@@ -357,17 +357,29 @@ io.on('connection', (socket) => {
 
   socket.on('typing', ({ groupeId }) => {
     socket.to('groupe_' + groupeId).emit('userTyping', { userId: socket.userId });
+    pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [groupeId])
+      .then(({ rows }) => rows.forEach(({ user_id }) => {
+        if (user_id !== socket.userId)
+          io.to('user_' + user_id).emit('sidebarTyping', { type: 'group', id: Number(groupeId) });
+      }));
   });
   socket.on('stopTyping', ({ groupeId }) => {
     socket.to('groupe_' + groupeId).emit('userStopTyping', { userId: socket.userId });
+    pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [groupeId])
+      .then(({ rows }) => rows.forEach(({ user_id }) => {
+        if (user_id !== socket.userId)
+          io.to('user_' + user_id).emit('sidebarStopTyping', { type: 'group', id: Number(groupeId) });
+      }));
   });
   socket.on('typingDM', ({ otherId }) => {
     const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
     socket.to(roomId).emit('userTypingDM', { userId: socket.userId });
+    io.to('user_' + Number(otherId)).emit('sidebarTyping', { type: 'dm', id: socket.userId });
   });
   socket.on('stopTypingDM', ({ otherId }) => {
     const roomId = 'dm_' + Math.min(socket.userId, Number(otherId)) + '_' + Math.max(socket.userId, Number(otherId));
     socket.to(roomId).emit('userStopTypingDM', { userId: socket.userId });
+    io.to('user_' + Number(otherId)).emit('sidebarStopTyping', { type: 'dm', id: socket.userId });
   });
 
   socket.on('disconnect', () => {
