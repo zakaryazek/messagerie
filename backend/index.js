@@ -29,7 +29,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use('/auth', authRoutes);
 app.use('/me', meRoutes);
-app.use('/groupes', groupesRoutes);
+app.use('/groupes', groupesRoutes(io));
 app.use('/groupes/:id/messages', messagesRoutes);
 app.use('/friendships', friendshipsRoutes(io));
 app.use('/users', usersRoutes);
@@ -61,6 +61,7 @@ io.on('connection', (socket) => {
   onlineUsers.set(socket.userId, socket.id);
   io.emit('userOnline', socket.userId);
   socket.emit('onlineUsers', Array.from(onlineUsers.keys()));
+  socket.join('user_' + socket.userId); // room personnelle toujours active
 
   // --- GROUPES ---
 
@@ -97,6 +98,12 @@ io.on('connection', (socket) => {
         groupe_id: id,
         reactions: []
       });
+      // Notifier tous les membres du groupe (même si le chat n'est pas ouvert)
+      const members = await pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [id]);
+      members.rows.forEach(({ user_id }) => {
+        if (user_id !== socket.userId) io.to('user_' + user_id).emit('conversationListUpdated');
+      });
+      io.to('user_' + socket.userId).emit('conversationListUpdated');
     } catch (err) { console.error('Erreur sendMessage:', err.message); }
   });
 
@@ -180,6 +187,9 @@ io.on('connection', (socket) => {
         receveur_id: targetId,
         reactions: []
       });
+      // Notifier le destinataire même si le chat n'est pas ouvert
+      io.to('user_' + targetId).emit('conversationListUpdated');
+      io.to('user_' + socket.userId).emit('conversationListUpdated');
     } catch (err) { console.error('Erreur sendPrivateMessage:', err.message); }
   });
 

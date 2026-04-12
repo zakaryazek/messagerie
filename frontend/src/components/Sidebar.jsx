@@ -6,9 +6,9 @@ import socket from '../socket';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-export default function Sidebar({ activeConversation, onSelectConversation }) {
+export default function Sidebar({ activeConversation, onSelectConversation, refreshTrigger = 0 }) {
   const { token, pseudo, userId, avatarUrl, onlineUsers } = useAuth();
-  
+
   // États Modification A
   const [me, setMe] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
@@ -39,7 +39,7 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
   // --- Initialisation & Fetch ---
 
   useEffect(() => {
-    // A) Fetch profil perso
+    // Fetch profil perso
     fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(setMe);
 
@@ -77,14 +77,35 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
   }, [activeTab, friendsTab]);
 
   useEffect(() => {
-    socket.on('newMessage', fetchDiscussions);
-    socket.on('newPrivateMessage', fetchDiscussions);
+    if (refreshTrigger > 0) fetchDiscussions();
+  }, [refreshTrigger]);
+
+  useEffect(() => {
+    const delayedFetch = () => setTimeout(fetchDiscussions, 100);
+    socket.on('newMessage', delayedFetch);
+    socket.on('newPrivateMessage', delayedFetch);
+
     socket.on('friendRemoved', fetchAmis);
     socket.on('friendRemoved', fetchDiscussions);
+
+    socket.on('addedToGroupe', ({ groupeId, userId: uid }) => {
+      fetchDiscussions();
+    });
+    socket.on('removedFromGroupe', ({ groupeId, userId: uid }) => {
+      if (Number(uid) === Number(userId)) fetchDiscussions();
+    });
+    socket.on('conversationListUpdated', fetchDiscussions);
+    socket.on('groupeDeleted', fetchDiscussions);
+    socket.on('groupeLeft', fetchDiscussions);
     return () => {
-      socket.off('newMessage');
-      socket.off('newPrivateMessage');
+      socket.off('newMessage', delayedFetch);
+      socket.off('newPrivateMessage', delayedFetch);
       socket.off('friendRemoved');
+      socket.off('addedToGroupe');
+      socket.off('removedFromGroupe');
+      socket.off('conversationListUpdated');
+      socket.off('groupeDeleted');
+      socket.off('groupeLeft');
     };
   }, []);
 
@@ -140,7 +161,7 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
 
   return (
     <div className="w-80 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col h-full relative">
-      
+
       {/* Modification A: Header avec Avatar */}
       <div className="px-4 py-4 border-b border-gray-800">
         <div className="flex items-center justify-between mb-3">
@@ -152,7 +173,7 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
               alt="Profil"
             />
             {onlineUsers.has(userId) && (
-               <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
             )}
           </button>
         </div>
@@ -204,13 +225,12 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
               <button
                 key={`${conv.type}-${conv.id}`}
                 onClick={() => onSelectConversation(conv)}
-                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors text-left ${
-                  activeConversation?.id === conv.id ? 'bg-gray-800' : ''
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors text-left ${activeConversation?.id === conv.id ? 'bg-gray-800' : ''
+                  }`}
               >
                 <div className="relative flex-shrink-0">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${conv.type === 'group' ? 'bg-purple-600' : 'bg-blue-600'}`}>
-                    {conv.type === 'group' ? '#' : (conv.name || '?').slice(0,1).toUpperCase()}
+                    {conv.type === 'group' ? '#' : (conv.name || '?').slice(0, 1).toUpperCase()}
                   </div>
                   {conv.type === 'dm' && onlineUsers.has(Number(conv.id)) && (
                     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900" />
@@ -219,7 +239,7 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between">
                     <span className="text-white text-sm font-semibold truncate">{conv.name}</span>
-                    <span className="text-gray-500 text-xs">{conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    <span className="text-gray-500 text-xs">{conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                   <p className="text-gray-500 text-xs truncate">{conv.last_message || 'Aucun message'}</p>
                 </div>
@@ -231,23 +251,23 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
         {/* Section Amis (Logique existante adaptée) */}
         {activeTab === 'amis' && (
           <div className="p-4 space-y-4">
-             <form onSubmit={searchUsers} className="flex gap-2">
+            <form onSubmit={searchUsers} className="flex gap-2">
               <input className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none"
                 placeholder="Chercher un utilisateur..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
               <button className="bg-blue-600 p-2 rounded-lg">🔍</button>
             </form>
 
             <div className="flex border-b border-gray-800">
-                <button onClick={() => setFriendsTab('amis')} className={`flex-1 py-1 text-xs ${friendsTab === 'amis' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Amis</button>
-                <button onClick={() => setFriendsTab('attente')} className={`flex-1 py-1 text-xs ${friendsTab === 'attente' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Attente</button>
+              <button onClick={() => setFriendsTab('amis')} className={`flex-1 py-1 text-xs ${friendsTab === 'amis' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Amis</button>
+              <button onClick={() => setFriendsTab('attente')} className={`flex-1 py-1 text-xs ${friendsTab === 'attente' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Attente</button>
             </div>
 
             {friendsTab === 'amis' && amis.map(a => (
-               <button key={a.user_id} onClick={() => onSelectConversation({type: 'dm', id: a.user_id, name: a.pseudo})}
+              <button key={a.user_id} onClick={() => onSelectConversation({ type: 'dm', id: a.user_id, name: a.pseudo })}
                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg transition-colors">
-                 <img src={a.avatar_url || '/default-avatar.png'} className="w-8 h-8 rounded-full" />
-                 <span className="text-white text-sm">{a.pseudo}</span>
-               </button>
+                <img src={a.avatar_url || '/default-avatar.png'} className="w-8 h-8 rounded-full" />
+                <span className="text-white text-sm">{a.pseudo}</span>
+              </button>
             ))}
           </div>
         )}
@@ -309,7 +329,7 @@ export default function Sidebar({ activeConversation, onSelectConversation }) {
         </div>
       )}
 
-      {showAccount && <AccountModal onClose={() => setShowAccount(false)} onOpenSettings={() => {setShowAccount(false); setShowSettings(true);}} />}
+      {showAccount && <AccountModal onClose={() => setShowAccount(false)} onOpenSettings={() => { setShowAccount(false); setShowSettings(true); }} />}
     </div>
   );
 }

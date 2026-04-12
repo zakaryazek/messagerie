@@ -107,6 +107,7 @@ router.delete('/:id', async (req, res) => {
     await client.query('DELETE FROM groupes WHERE id = $1', [groupeId]);
     await client.query('COMMIT');
     res.json({ message: 'Groupe supprimé' });
+    if (_io) _io.emit('groupeDeleted', { groupeId });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Erreur serveur' });
@@ -146,6 +147,7 @@ router.post('/:id/members', authMiddleware, async (req, res) => {
       [req.params.id, userId]
     );
     res.json({ success: true });
+    if (_io) _io.emit('addedToGroupe', { groupeId: Number(req.params.id), userId: Number(userId) });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -165,6 +167,7 @@ router.delete('/:id/members/:userId', authMiddleware, async (req, res) => {
       ['Un membre a été retiré du groupe.', req.params.id]
     );
     res.json({ success: true });
+    if (_io) _io.emit('removedFromGroupe', { groupeId: Number(req.params.id), userId: Number(req.params.userId) });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -186,7 +189,9 @@ router.post('/:id/leave', authMiddleware, async (req, res) => {
       [req.params.id, req.userId]
     );
     res.json({ success: true });
+    if (_io) _io.emit('groupeLeft', { groupeId: Number(req.params.id), userId: Number(req.userId) });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-module.exports = router;
+let _io = null;
+module.exports = (io) => { _io = io; return router; };
