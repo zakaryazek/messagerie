@@ -23,7 +23,10 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
   const { token } = useAuth();
   const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const isGroupe = conversation.type === 'group';
-  const convKey = isGroupe ? 'groupe_' + conversation.id : 'dm_' + conversation.id;
+  const convKey = isGroupe
+  ? 'groupe_' + conversation.id
+  : 'dm_' + Math.min(Number(currentUserId), Number(conversation.id)) 
+  + '_' + Math.max(Number(currentUserId), Number(conversation.id));
 
   const [members, setMembers] = useState([]);
   const [friends, setFriends] = useState([]);

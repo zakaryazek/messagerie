@@ -30,8 +30,10 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
 
   // Clé unique de la conversation (même format que le backend)
   const convKey = conversation
-    ? (isGroup ? 'groupe_' + conversation.id : 'dm_' + conversation.id)
-    : null;
+  ? (isGroup
+      ? 'groupe_' + conversation.id
+      : 'dm_' + Math.min(Number(userId), Number(conversation.id)) + '_' + Math.max(Number(userId), Number(conversation.id)))
+  : null;
 
   async function loadMessages() {
     if (!conversation) return;
@@ -349,7 +351,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col" style={chatBackground ? { background: chatBackground } : undefined}>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 flex flex-col" style={chatBackground ? { background: chatBackground } : undefined}>
         {messages.map(msg => (
           <MessageItem
             key={msg.id}

@@ -6,15 +6,9 @@ router.use(authMiddleware);
 
 let _io = null;
 
-function dmRoom(userId, otherKey) {
-  // otherKey = 'dm_5' → extract otherId → compute 'dm_1_5'
-  const otherId = Number(otherKey.replace('dm_', ''));
-  return 'dm_' + Math.min(userId, otherId) + '_' + Math.max(userId, otherId);
-}
-
-function getRoom(conversationKey, userId) {
-  if (conversationKey.startsWith('groupe_')) return conversationKey;
-  return dmRoom(userId, conversationKey);
+function getRoom(conversationKey) {
+  // conversationKey est déjà canonique : 'groupe_X' ou 'dm_MIN_MAX'
+  return conversationKey;
 }
 
 router.get('/bubble', async (req, res) => {
@@ -57,7 +51,7 @@ router.post('/bubble', async (req, res) => {
       [req.userId, conversationKey, color]
     );
     if (_io) {
-      const room = getRoom(conversationKey, req.userId);
+      const room = getRoom(conversationKey);
       _io.to(room).emit('bubbleColorChanged', { userId: req.userId, color, conversationKey });
     }
     res.json({ success: true });
@@ -74,7 +68,7 @@ router.post('/background', async (req, res) => {
       [conversationKey, background]
     );
     if (_io) {
-      const room = getRoom(conversationKey, req.userId);
+      const room = getRoom(conversationKey);
       _io.to(room).emit('backgroundChanged', { background, conversationKey });
     }
     res.json({ success: true });

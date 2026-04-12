@@ -48,7 +48,7 @@ export default function MessageItem({ msg, conversation, currentUserId, onReply,
         {/* Bulle */}
         <div
           id={'msg-' + msg.id}
-          className={`relative max-w-xs lg:max-w-md px-3 py-2 rounded-2xl text-sm text-white ${isDeleted ? 'opacity-40 italic' : ''}`}
+          className={`relative max-w-[320px] px-3 py-2 rounded-2xl text-sm text-white ${isDeleted ? 'opacity-40 italic' : ''}`}
           style={{ backgroundColor: bubbleColor }}
         >
           {!isOwn && !isDeleted && (
@@ -56,7 +56,7 @@ export default function MessageItem({ msg, conversation, currentUserId, onReply,
           )}
           {isDeleted
             ? <span>Message supprimé</span>
-            : <span style={{ whiteSpace: 'pre-wrap' }}>{msg.contenu}</span>
+            : <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.contenu}</span>
           }
           {msg.edited_at && !isDeleted && (
             <span className="text-xs text-gray-300 ml-1">(modifié)</span>
