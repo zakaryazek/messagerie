@@ -90,13 +90,22 @@ io.on('connection', (socket) => {
       );
       const user = await pool.query('SELECT pseudo FROM users WHERE id = $1', [socket.userId]);
       const msg = result.rows[0];
+      let replyToObj = null;
+      if (replyToId) {
+        const rp = await pool.query(
+          `SELECT m.id, m.contenu, COALESCE(u.pseudo,'[Utilisateur supprimé]') AS sender
+           FROM messages m LEFT JOIN users u ON u.id = m.sender_id WHERE m.id = $1`, [replyToId]
+        );
+        replyToObj = rp.rows[0] || null;
+      }
       io.to('groupe_' + id).emit('newMessage', {
         ...msg,
         attachment_url: fullUrl(msg.attachment_url),
         sender: user.rows[0].pseudo,
         sender_id: socket.userId,
         groupe_id: id,
-        reactions: []
+        reactions: [],
+        reply_to: replyToObj
       });
       // Notifier tous les membres du groupe (même si le chat n'est pas ouvert)
       const members = await pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [id]);
@@ -179,13 +188,22 @@ io.on('connection', (socket) => {
       const user = await pool.query('SELECT pseudo FROM users WHERE id = $1', [socket.userId]);
       const msg = result.rows[0];
       const roomId = 'dm_' + Math.min(socket.userId, targetId) + '_' + Math.max(socket.userId, targetId);
+      let replyToObj = null;
+      if (replyToId) {
+        const rp = await pool.query(
+          `SELECT mp.id, mp.contenu, COALESCE(u.pseudo,'[Utilisateur supprimé]') AS sender
+           FROM messages_prives mp LEFT JOIN users u ON u.id = mp.sender_id WHERE mp.id = $1`, [replyToId]
+        );
+        replyToObj = rp.rows[0] || null;
+      }
       io.to(roomId).emit('newPrivateMessage', {
         ...msg,
         attachment_url: fullUrl(msg.attachment_url),
         sender: user.rows[0].pseudo,
         sender_id: socket.userId,
         receveur_id: targetId,
-        reactions: []
+        reactions: [],
+        reply_to: replyToObj
       });
       // Notifier le destinataire même si le chat n'est pas ouvert
       io.to('user_' + targetId).emit('conversationListUpdated');
@@ -315,15 +333,15 @@ io.on('connection', (socket) => {
       let msg;
       if (type === 'groupe') {
         const r = await pool.query(
-          `SELECT m.*, u.pseudo AS sender FROM messages m
-           JOIN users u ON u.id = m.sender_id WHERE m.id = $1`,
+          `SELECT m.*, COALESCE(u.pseudo, '[Utilisateur supprimé]') AS sender FROM messages m
+           LEFT JOIN users u ON u.id = m.sender_id WHERE m.id = $1`,
           [messageId]
         );
         msg = r.rows[0];
       } else {
         const r = await pool.query(
-          `SELECT mp.*, u.pseudo AS sender FROM messages_prives mp
-           JOIN users u ON u.id = mp.sender_id WHERE mp.id = $1`,
+          `SELECT mp.*, COALESCE(u.pseudo, '[Utilisateur supprimé]') AS sender FROM messages_prives mp
+           LEFT JOIN users u ON u.id = mp.sender_id WHERE mp.id = $1`,
           [messageId]
         );
         msg = r.rows[0];

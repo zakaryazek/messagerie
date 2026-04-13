@@ -36,9 +36,18 @@ router.get('/', checkMembership, async (req, res) => {
             json_build_object('emoji', r.emoji, 'count', r.cnt, 'reacted_by_me', r.reacted_by_me)
           ) FILTER (WHERE r.emoji IS NOT NULL),
           '[]'
-        ) AS reactions
+        ) AS reactions,
+        CASE WHEN m.reply_to_id IS NOT NULL THEN
+          json_build_object(
+            'id', rp.id,
+            'contenu', rp.contenu,
+            'sender', COALESCE(ru.pseudo, '[Utilisateur supprimé]')
+          )
+        END AS reply_to
        FROM messages m
        LEFT JOIN users u ON u.id = m.sender_id
+       LEFT JOIN messages rp ON rp.id = m.reply_to_id
+       LEFT JOIN users ru ON ru.id = rp.sender_id
        LEFT JOIN (
          SELECT message_id, emoji, COUNT(*) as cnt,
                 BOOL_OR(user_id = $2) as reacted_by_me
@@ -46,7 +55,7 @@ router.get('/', checkMembership, async (req, res) => {
          GROUP BY message_id, emoji
        ) r ON r.message_id = m.id
        WHERE m.groupe_id = $1 AND m.deleted_at IS NULL
-       GROUP BY m.id, u.pseudo
+       GROUP BY m.id, u.pseudo, rp.id, rp.contenu, ru.pseudo
        ORDER BY m.created_at ASC`,
       [groupeId, req.userId]
     );
