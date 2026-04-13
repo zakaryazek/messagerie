@@ -26,6 +26,12 @@ function TypingDots() {
   );
 }
 
+
+function convKeyFor(conv, userId) {
+  if (conv.type === 'group') return 'groupe_' + conv.id;
+  return 'dm_' + Math.min(Number(userId), Number(conv.id)) + '_' + Math.max(Number(userId), Number(conv.id));
+}
+
 export default function Sidebar({ activeConversation, onSelectConversation, refreshTrigger = 0 }) {
   const { token, pseudo, userId, avatarUrl, onlineUsers } = useAuth();
 
@@ -56,6 +62,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
 
   const [showSettings, setShowSettings] = useState(false);
   const [typingConvs, setTypingConvs] = useState({}); // { 'group-12': timeoutId, 'dm-5': timeoutId }
+  const [unreadMap, setUnreadMap] = useState({}); // { convKey: count }
 
   // --- Initialisation & Fetch ---
 
@@ -73,7 +80,32 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
-    if (Array.isArray(data)) setConversations(data);
+    if (Array.isArray(data)) {
+      setConversations(data);
+      // Sync unread counts from server (skip active conversation)
+      const map = {};
+      data.forEach(c => {
+        const key = convKeyFor(c, userId);
+        map[key] = c.unread_count || 0;
+      });
+      setUnreadMap(prev => {
+        // Preserve 0 for active conversation (already marked read)
+        const next = { ...map };
+        return next;
+      });
+    }
+  }
+
+  async function markRead(conv) {
+    const key = convKeyFor(conv, userId);
+    setUnreadMap(prev => ({ ...prev, [key]: 0 }));
+    try {
+      await fetch(`${API}/conversations/mark-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ convKey: key })
+      });
+    } catch (e) { console.error('markRead', e); }
   }
 
   async function fetchAmis() {
@@ -100,6 +132,13 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
   useEffect(() => {
     if (refreshTrigger > 0) fetchDiscussions();
   }, [refreshTrigger]);
+
+  // Auto-mark active conversation as read when it changes
+  useEffect(() => {
+    if (activeConversation) {
+      markRead(activeConversation);
+    }
+  }, [activeConversation?.id, activeConversation?.type]);
 
   useEffect(() => {
     const delayedFetch = () => setTimeout(fetchDiscussions, 100);
@@ -266,7 +305,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
             {filteredConversations.map(conv => (
               <button
                 key={`${conv.type}-${conv.id}`}
-                onClick={() => onSelectConversation(conv)}
+                onClick={() => { markRead(conv); onSelectConversation(conv); }}
                 className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors text-left ${activeConversation?.id === conv.id ? 'bg-gray-800' : ''
                   }`}
               >
@@ -279,14 +318,28 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between">
-                    <span className="text-white text-sm font-semibold truncate">{conv.name}</span>
-                    <span className="text-gray-500 text-xs">{conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <div className="flex justify-between items-center">
+                    <span className={`text-sm truncate ${unreadMap[convKeyFor(conv, userId)] > 0 ? 'text-white font-bold' : 'text-white font-semibold'}`}>{conv.name}</span>
+                    <span className="text-gray-500 text-xs flex-shrink-0 ml-1">
+                      {conv.last_message_at && new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
-                  {typingConvs[`${conv.type}-${conv.id}`]
-                    ? <TypingDots />
-                    : <p className="text-gray-500 text-xs truncate">{conv.last_message || 'Aucun message'}</p>
-                  }
+                  <div className="flex justify-between items-center mt-0.5">
+                    {typingConvs[`${conv.type}-${conv.id}`]
+                      ? <TypingDots />
+                      : <p className={`text-xs truncate ${unreadMap[convKeyFor(conv, userId)] > 0 ? 'text-gray-300' : 'text-gray-500'}`}>
+                          {conv.last_attachment && !conv.last_message
+                            ? '🖼 Image'
+                            : (conv.last_message || 'Aucun message')
+                          }
+                        </p>
+                    }
+                    {unreadMap[convKeyFor(conv, userId)] > 0 && (
+                      <span className="flex-shrink-0 ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-green-500 text-white text-[11px] font-bold flex items-center justify-center leading-none">
+                        {unreadMap[convKeyFor(conv, userId)] > 99 ? '99+' : unreadMap[convKeyFor(conv, userId)]}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             ))}

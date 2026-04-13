@@ -3,7 +3,7 @@ import socket from '../socket';
 
 const EMOJIS = ['👍','❤️','😂','😮','😢','🔥'];
 
-export default function MessageItem({ msg, conversation, currentUserId, onReply, onEdit, onPin, bubbleColor }) {
+export default function MessageItem({ msg, conversation, currentUserId, onReply, onEdit, onPin, bubbleColor, isSending, isLastOwn }) {
   const [hovered, setHovered] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const isOwn = Number(msg.sender_id) === Number(currentUserId);
@@ -105,13 +105,36 @@ export default function MessageItem({ msg, conversation, currentUserId, onReply,
         </div>
       )}
 
-      {/* Vu */}
-      {isOwn && !isDeleted && (
-        <span className="text-xs text-gray-400 mt-0.5">
-          {conversation.type !== 'group'
-            ? (msg.is_read ? '✓✓ Vu' : '✓')
-            : msg.readers?.length > 0 ? `Vu par ${msg.readers.join(', ')}` : null
-          }
+      {/* Statut envoi — uniquement sur le dernier message envoyé par nous, en DM */}
+      {isOwn && !isDeleted && conversation.type !== 'group' && isLastOwn && (() => {
+        let label, color;
+        if (isSending) {
+          label = 'En cours d\'envoi…';
+          color = 'text-gray-500';
+        } else if (msg.is_read) {
+          label = 'Vu';
+          color = 'text-blue-400';
+        } else {
+          label = 'Envoyé';
+          color = 'text-gray-400';
+        }
+        return (
+          <span className={`text-[11px] mt-0.5 ${color} flex items-center gap-1`}>
+            {isSending
+              ? <span className="inline-block w-2 h-2 rounded-full bg-gray-500 animate-pulse" />
+              : msg.is_read
+                ? <svg className="w-3 h-3 inline" viewBox="0 0 16 16" fill="none"><path d="M1 8l4 4L15 3" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 8l4 4" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                : <svg className="w-3 h-3 inline" viewBox="0 0 16 16" fill="none"><path d="M2 8l4 4L14 3" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            }
+            {label}
+          </span>
+        );
+      })()}
+
+      {/* Statut "vu par" en groupe */}
+      {isOwn && !isDeleted && conversation.type === 'group' && msg.readers?.length > 0 && (
+        <span className="text-[11px] text-gray-400 mt-0.5">
+          Vu par {msg.readers.join(', ')}
         </span>
       )}
     </div>

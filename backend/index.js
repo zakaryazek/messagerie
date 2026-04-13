@@ -34,7 +34,7 @@ app.use('/groupes/:id/messages', messagesRoutes);
 app.use('/friendships', friendshipsRoutes(io));
 app.use('/users', usersRoutes);
 app.use('/dm/:userId/messages', dmRoutes);
-app.use('/conversations', conversationsRoutes);
+app.use('/conversations', conversationsRoutes(io));
 app.use('/upload', uploadRoutes);
 app.use('/settings', settingsRoutes(io));
 
@@ -234,15 +234,15 @@ io.on('connection', (socket) => {
   socket.on('openedDM', async (otherId) => {
     const targetId = Number(otherId);
     try {
-      const unread = await pool.query(
-        `UPDATE messages_prives SET is_read = true 
-       WHERE receveur_id = $1 AND sender_id = $2 AND is_read = false 
-       RETURNING id`,
+      await pool.query(
+        `UPDATE messages_prives SET is_read = true
+         WHERE receveur_id = $1 AND sender_id = $2 AND is_read = false`,
         [socket.userId, targetId]
       );
-      if (unread.rows.length === 0) return;
+      // Toujours émettre, même si rien n'a changé (markConvRead HTTP a pu passer en premier)
       const roomId = 'dm_' + Math.min(socket.userId, targetId) + '_' + Math.max(socket.userId, targetId);
       io.to(roomId).emit('allDMRead', { readBy: socket.userId });
+      io.to('user_' + targetId).emit('allDMRead', { readBy: socket.userId });
     } catch (err) { console.error(err.message); }
   });
 

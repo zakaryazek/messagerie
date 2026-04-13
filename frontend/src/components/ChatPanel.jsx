@@ -134,6 +134,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
   const [myBubbleColor, setMyBubbleColor] = useState('#3B82F6');
   const [chatBackground, setChatBackground] = useState(null);
   const [membersColors, setMembersColors] = useState({});
+  const [sendingMsgId, setSendingMsgId] = useState(null); // id temporaire du message en cours d'envoi
 
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -147,6 +148,17 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       ? 'groupe_' + conversation.id
       : 'dm_' + Math.min(Number(userId), Number(conversation.id)) + '_' + Math.max(Number(userId), Number(conversation.id)))
   : null;
+
+  async function markConvRead() {
+    if (!conversation || !convKey) return;
+    try {
+      await fetch(`${API}/conversations/mark-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ convKey })
+      });
+    } catch (e) { /* silencieux */ }
+  }
 
   async function loadMessages() {
     if (!conversation) return;
@@ -244,13 +256,14 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     setMyBubbleColor('#3B82F6');
     setChatBackground(null);
     setMembersColors({});
+    setSendingMsgId(null);
     
     loadMessages();
+    markConvRead();
 
     // Notifier qu'on a ouvert la conversation
     const convId = Number(conversation.id);
     if (isGroup) socket.emit('openedGroupe', convId);
-    else socket.emit('openedDM', convId);
 
     loadPinned();
     loadSettings();
@@ -258,13 +271,40 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     if (isGroup) {
       socket.emit('joinRoom', convId);
       socket.on('newMessage', (msg) => {
-        if (Number(msg.groupe_id) === convId) setMessages(prev => [...prev, msg]);
+        if (Number(msg.groupe_id) === convId) {
+          setMessages(prev => {
+            // Remplace le message optimiste si c'est le nôtre, sinon ajoute
+            if (Number(msg.sender_id) === Number(userId)) {
+              const hasTemp = prev.some(m => m._sending);
+              if (hasTemp) {
+                setSendingMsgId(null);
+                return prev.map(m => m._sending ? { ...msg, attachment_url: msg.attachment_url } : m);
+              }
+            }
+            return [...prev, msg];
+          });
+          markConvRead();
+        }
       });
     } else {
       socket.emit('joinDM', convId);
       socket.on('newPrivateMessage', (msg) => {
         if (Number(msg.sender_id) === convId || Number(msg.receveur_id) === convId) {
-          setMessages(prev => [...prev, msg]);
+          if (Number(msg.sender_id) === Number(userId)) {
+            // C'est notre propre message qui revient : remplace l'optimiste
+            setMessages(prev => {
+              const hasTemp = prev.some(m => m._sending);
+              if (hasTemp) {
+                setSendingMsgId(null);
+                return prev.map(m => m._sending ? { ...msg } : m);
+              }
+              return [...prev, msg];
+            });
+          } else {
+            setMessages(prev => [...prev, msg]);
+            // Message reçu : marquer lu immédiatement
+            markConvRead();
+          }
         }
       });
     }
@@ -291,17 +331,6 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, readers } : m));
     });
     
-    // --- Nouveaux listeners pour lecture globale ---
-    socket.on('allDMRead', ({ readBy }) => {
-      if (Number(readBy) !== Number(userId)) {
-        setMessages(prev => prev.map(m => ({ ...m, is_read: true })));
-      }
-    });
-    socket.on('allGroupeRead', ({ userId: uid }) => {
-      // optionnel: mettre à jour les readers
-    });
-    // ------------------------------------------------
-
     socket.on('messagePinned', ({ conversationKey, pinnedMsg: msg }) => {
       if (conversationKey === convKey) setPinnedMsg(msg);
     });
@@ -344,14 +373,25 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       socket.off('bubbleColorChanged'); socket.off('backgroundChanged');
       socket.off('userTyping'); socket.off('userStopTyping');
       socket.off('userTypingDM'); socket.off('userStopTypingDM');
-      // Cleanup nouveaux listeners
-      socket.off('allDMRead'); socket.off('allGroupeRead');
     };
   }, [conversation?.id, conversation?.type]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typingUsers]);
+
+  // Listener persistant pour "vu" — reçu via canal personnel user_X
+  // indépendant de la conversation ouverte, donc jamais manqué
+  useEffect(() => {
+    const handleAllDMRead = ({ readBy }) => {
+      // readBy = celui qui a lu (l'autre personne), pas nous
+      if (Number(readBy) !== Number(userId)) {
+        setMessages(prev => prev.map(m => ({ ...m, is_read: true })));
+      }
+    };
+    socket.on('allDMRead', handleAllDMRead);
+    return () => socket.off('allDMRead', handleAllDMRead);
+  }, [userId]);
 
   const handleInputChange = (e) => {
     setInputValue(e.target.value);
@@ -404,6 +444,24 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       attachmentUrl,
       replyToId: replyTo?.id
     };
+
+    // Message optimiste "en cours d'envoi"
+    // On capture pendingPreview ici (avant setPendingPreview(null))
+    const localPreview = pendingPreview || null;
+    const tempId = 'temp_' + Date.now();
+    const optimisticMsg = {
+      id: tempId,
+      contenu: payload.contenu,
+      attachment_url: localPreview,
+      sender_id: Number(userId),
+      sender: pseudo,
+      created_at: new Date().toISOString(),
+      reactions: [],
+      is_read: false,
+      _sending: true,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setSendingMsgId(tempId);
 
     if (isGroup) socket.emit('sendMessage', { ...payload, groupeId: convId });
     else socket.emit('sendPrivateMessage', { ...payload, receveurId: convId });
@@ -471,22 +529,31 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       )}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 flex flex-col relative z-10"
         style={chatBackground && !chatBackground.startsWith('animated:') ? { background: chatBackground } : undefined}>
-        {messages.map(msg => (
-          <MessageItem
-            key={msg.id}
-            msg={msg}
-            conversation={conversation}
-            currentUserId={userId}
-            onReply={setReplyTo}
-            onEdit={(m) => { setEditingMsg(m); setInputValue(m.contenu); setReplyTo(null); }}
-            onPin={handlePin}
-            bubbleColor={
-              Number(msg.sender_id) === Number(userId)
-                ? myBubbleColor
-                : (membersColors[msg.sender_id] || '#4B5563')
-            }
-          />
-        ))}
+        {(() => {
+          // Trouver l'id du dernier message envoyé par nous (non supprimé)
+          const lastOwnMsg = [...messages].reverse().find(
+            m => Number(m.sender_id) === Number(userId) && !m.deleted_at
+          );
+          const lastOwnId = lastOwnMsg?.id;
+          return messages.map(msg => (
+            <MessageItem
+              key={msg.id}
+              msg={msg}
+              conversation={conversation}
+              currentUserId={userId}
+              onReply={setReplyTo}
+              onEdit={(m) => { setEditingMsg(m); setInputValue(m.contenu); setReplyTo(null); }}
+              onPin={handlePin}
+              bubbleColor={
+                Number(msg.sender_id) === Number(userId)
+                  ? myBubbleColor
+                  : (membersColors[msg.sender_id] || '#4B5563')
+              }
+              isSending={msg._sending === true}
+              isLastOwn={msg.id === lastOwnId}
+            />
+          ));
+        })()}
         {typingUsers.length > 0 && (
           <div className="text-xs text-gray-500 italic mt-2 animate-pulse">
             {typingUsers.length === 1 ? 'Quelqu\'un écrit...' : 'Plusieurs personnes écrivent...'}
