@@ -87,14 +87,10 @@ router.patch('/status', async (req, res) => {
   }
 });
 
-// DELETE /me
+// DELETE /me — suppression définitive du compte
 router.delete('/', async (req, res) => {
   try {
-    await pool.query(
-      `UPDATE users SET pseudo = '[Utilisateur supprimé]', email = NULL,
-       password_hash = '', avatar_url = NULL WHERE id = $1`,
-      [req.userId]
-    );
+    await pool.query(`DELETE FROM users WHERE id = $1`, [req.userId]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });

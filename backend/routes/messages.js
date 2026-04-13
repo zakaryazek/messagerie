@@ -30,7 +30,7 @@ router.get('/', checkMembership, async (req, res) => {
   const groupeId = parseInt(req.params.id);
   try {
     const result = await pool.query(
-      `SELECT m.*, u.pseudo AS sender,
+      `SELECT m.*, COALESCE(u.pseudo, '[Utilisateur supprimé]') AS sender,
         COALESCE(
           json_agg(
             json_build_object('emoji', r.emoji, 'count', r.cnt, 'reacted_by_me', r.reacted_by_me)
@@ -38,7 +38,7 @@ router.get('/', checkMembership, async (req, res) => {
           '[]'
         ) AS reactions
        FROM messages m
-       JOIN users u ON u.id = m.sender_id
+       LEFT JOIN users u ON u.id = m.sender_id
        LEFT JOIN (
          SELECT message_id, emoji, COUNT(*) as cnt,
                 BOOL_OR(user_id = $2) as reacted_by_me

@@ -14,7 +14,14 @@ router.get('/', async (req, res) => {
     const result = await pool.query(
       `SELECT id, pseudo, created_at
        FROM users
-       WHERE pseudo ILIKE $1 AND id != $2
+       WHERE pseudo ILIKE $1
+         AND id != $2
+         AND password_hash != ''
+         AND id NOT IN (
+           SELECT CASE WHEN demandeur_id = $2 THEN receveur_id ELSE demandeur_id END
+           FROM friendships
+           WHERE (demandeur_id = $2 OR receveur_id = $2)
+         )
        LIMIT 10`,
       [`%${search}%`, req.userId]
     );

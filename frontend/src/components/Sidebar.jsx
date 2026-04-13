@@ -147,6 +147,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
 
     socket.on('friendRemoved', fetchAmis);
     socket.on('friendRemoved', fetchDiscussions);
+    socket.on('friendRequestUpdated', () => { fetchAmis(); fetchPending(); fetchDiscussions(); });
 
     socket.on('addedToGroupe', ({ groupeId, userId: uid }) => {
       fetchDiscussions();
@@ -180,6 +181,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
       socket.off('newMessage', delayedFetch);
       socket.off('newPrivateMessage', delayedFetch);
       socket.off('friendRemoved');
+      socket.off('friendRequestUpdated');
       socket.off('addedToGroupe');
       socket.off('removedFromGroupe');
       socket.off('conversationListUpdated');
@@ -224,12 +226,15 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
   }
 
   async function addFriend(userId) {
-    await fetch(`${API}/friendships/${userId}`, {
+    const res = await fetch(`${API}/friendships/${userId}`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` }
     });
-    setSearchMsg('Demande envoyée !');
+    const data = await res.json();
+    setSearchMsg(res.ok ? 'Demande envoyée !' : (data.error || 'Erreur'));
     setSearchResults([]); setUserSearch('');
     fetchPending();
+    if (res.ok) setFriendsTab('attente');
+    setTimeout(() => setSearchMsg(''), 3000);
   }
 
   // --- Rendu ---
@@ -351,9 +356,25 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
           <div className="p-4 space-y-4">
             <form onSubmit={searchUsers} className="flex gap-2">
               <input className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none"
-                placeholder="Chercher un utilisateur..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
+                placeholder="Chercher un utilisateur..." value={userSearch}
+                onChange={e => { setUserSearch(e.target.value); setSearchResults([]); setSearchMsg(''); }} />
               <button className="bg-blue-600 p-2 rounded-lg">🔍</button>
             </form>
+
+            {searchMsg && <p className="text-xs text-center text-green-400">{searchMsg}</p>}
+            {searchResults.length > 0 && (
+              <div className="space-y-1">
+                {searchResults.map(u => (
+                  <div key={u.id} className="flex items-center justify-between p-2 bg-gray-800 rounded-lg">
+                    <span className="text-white text-sm">{u.pseudo}</span>
+                    <button onClick={() => addFriend(u.id)}
+                      className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded transition">
+                      Ajouter
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex border-b border-gray-800">
               <button onClick={() => setFriendsTab('amis')} className={`flex-1 py-1 text-xs ${friendsTab === 'amis' ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500'}`}>Amis</button>
@@ -367,6 +388,62 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
                 <span className="text-white text-sm">{a.pseudo}</span>
               </button>
             ))}
+
+            {friendsTab === 'attente' && (
+              <div className="space-y-3">
+                {/* Invitations reçues */}
+                {demandes.length > 0 && (
+                  <div>
+                    <p className="text-gray-500 text-xs uppercase font-bold mb-1">Reçues</p>
+                    {demandes.map(r => (
+                      <div key={r.id} className="flex items-center justify-between p-2 bg-gray-800 rounded-lg mb-1">
+                        <span className="text-white text-sm">{r.pseudo}</span>
+                        <div className="flex gap-1">
+                          <button onClick={async () => {
+                            await fetch(`${API}/friendships/${r.id}/accepter`, {
+                              method: 'PATCH', headers: { Authorization: `Bearer ${token}` }
+                            });
+                            fetchAmis(); fetchDiscussions(); fetchPending();
+                          }} className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-1 rounded transition">
+                            ✓
+                          </button>
+                          <button onClick={async () => {
+                            await fetch(`${API}/friendships/${r.id}/decline`, {
+                              method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
+                            });
+                            fetchAmis(); fetchPending();
+                          }} className="text-xs bg-red-800 hover:bg-red-700 text-white px-2 py-1 rounded transition">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Invitations envoyées */}
+                {pendingRequests.length > 0 && (
+                  <div>
+                    <p className="text-gray-500 text-xs uppercase font-bold mb-1">Envoyées</p>
+                    {pendingRequests.map(r => (
+                      <div key={r.id} className="flex items-center justify-between p-2 bg-gray-800 rounded-lg mb-1">
+                        <span className="text-white text-sm">{r.pseudo}</span>
+                        <button onClick={async () => {
+                          await fetch(`${API}/friendships/${r.id}/cancel`, {
+                            method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
+                          });
+                          fetchPending();
+                        }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded border border-red-800 hover:border-red-600 transition">
+                          Annuler
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {demandes.length === 0 && pendingRequests.length === 0 && (
+                  <p className="text-gray-500 text-xs text-center">Aucune demande en attente</p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

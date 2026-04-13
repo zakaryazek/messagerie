@@ -67,20 +67,42 @@ router.get('/', async (req, res) => {
 // PATCH /friendships/:id/accepter — accepter une demande
 router.patch('/:id/accepter', async (req, res) => {
   const friendshipId = parseInt(req.params.id);
-
   try {
     const result = await pool.query(
       `UPDATE friendships
        SET statut = 'accepted', accepted_at = NOW()
        WHERE id = $1 AND receveur_id = $2 AND statut = 'pending'
-       RETURNING id, statut`,
+       RETURNING id, statut, demandeur_id`,
       [friendshipId, req.userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Demande introuvable' });
+    // Notifier les deux pour rafraîchir leur liste
+    if (_io) {
+      _io.to('user_' + req.userId).emit('friendRequestUpdated');
+      _io.to('user_' + result.rows[0].demandeur_id).emit('friendRequestUpdated');
+    }
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
+});
+
+// DELETE /friendships/:id/decline — refuser une demande reçue
+router.delete('/:id/decline', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM friendships
+       WHERE id = $1 AND receveur_id = $2 AND statut = 'pending'
+       RETURNING id, demandeur_id`,
+      [req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Demande introuvable' });
+    if (_io) {
+      _io.to('user_' + req.userId).emit('friendRequestUpdated');
+      _io.to('user_' + result.rows[0].demandeur_id).emit('friendRequestUpdated');
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
 // Demandes envoyées en attente
