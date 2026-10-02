@@ -1,32 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const fs = require('fs');
-const path = require('path');
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { updateMeSchema, validate } = require('../validation');
+const { fullUrl, normalizeUploadUrl } = require('../utils/url');
 router.use(authMiddleware);
 
 const BCRYPT_ROUNDS = 12;
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-
-function fullUrl(url) {
-  if (!url) return null;
-  if (url.startsWith('http')) return url;
-  return API_BASE + url;
-}
-
-// Une image de profil doit être un fichier uploadé chez nous (jamais une URL externe).
-// Renvoie le chemin relatif (/uploads/xxx.png), null pour supprimer l'image, undefined si invalide.
-function normalizeAvatar(url) {
-  if (url === null || url === '') return null;
-  const rel = url.startsWith(API_BASE + '/') ? url.slice(API_BASE.length) : url;
-  if (!/^\/uploads\/[^/\\?#]+$/.test(rel) || rel.includes('..')) return undefined;
-  if (!fs.existsSync(path.join(UPLOADS_DIR, path.basename(rel)))) return undefined;
-  return rel;
-}
 
 // GET /me
 router.get('/', async (req, res) => {
@@ -76,7 +57,7 @@ router.patch('/', async (req, res) => {
       updates.push(`password_hash = $${i++}`); values.push(hash);
     }
     if (avatar_url !== undefined) {
-      const avatar = normalizeAvatar(avatar_url);
+      const avatar = normalizeUploadUrl(avatar_url);
       if (avatar === undefined) return res.status(400).json({ error: 'Image de profil invalide' });
       updates.push(`avatar_url = $${i++}`); values.push(avatar);
     }

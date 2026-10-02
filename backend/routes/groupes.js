@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { fullUrl } = require('../utils/url');
+const { fullUrl, normalizeUploadUrl } = require('../utils/url');
 const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -143,16 +143,16 @@ router.get('/:id/members', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-// Ajouter un membre (admin seulement)
+// Ajouter un membre (tout membre du groupe peut le faire)
 router.post('/:id/members', authMiddleware, async (req, res) => {
   const groupeId = parseInt(req.params.id);
   const userId = parseInt(req.body?.userId);
   if (isNaN(groupeId) || isNaN(userId)) return res.status(400).json({ error: 'ID invalide' });
   try {
-    const admin = await pool.query(
-      'SELECT 1 FROM groupes WHERE id = $1 AND admin_id = $2', [groupeId, req.userId]
+    const member = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
     );
-    if (admin.rows.length === 0) return res.status(403).json({ error: 'Non autorisé' });
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
     const user = await pool.query('SELECT 1 FROM users WHERE id = $1', [userId]);
     if (user.rows.length === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const count = await pool.query(
@@ -167,6 +167,37 @@ router.post('/:id/members', authMiddleware, async (req, res) => {
     res.json({ success: true });
     if (_io) _io.emit('addedToGroupe', { groupeId, userId });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// Changer la photo du groupe (tout membre du groupe peut le faire ; null = retirer la photo)
+router.patch('/:id/photo', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  if (isNaN(groupeId)) return res.status(400).json({ error: 'ID invalide' });
+  const photo = req.body?.photo_url;
+  if (photo === undefined) return res.status(400).json({ error: 'photo_url requis' });
+  try {
+    const member = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
+    );
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
+
+    const rel = normalizeUploadUrl(photo);
+    if (rel === undefined) return res.status(400).json({ error: 'Image de groupe invalide' });
+
+    await pool.query('UPDATE groupes SET photo_url = $1 WHERE id = $2', [rel, groupeId]);
+    const avatar_url = fullUrl(rel);
+    res.json({ avatar_url });
+
+    if (_io) {
+      // Chat ouvert : met à jour l'en-tête ; sidebar de chaque membre : recharge la liste
+      _io.to('groupe_' + groupeId).emit('groupePhotoChanged', { groupeId, avatar_url });
+      const members = await pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [groupeId]);
+      members.rows.forEach(({ user_id }) => _io.to('user_' + user_id).emit('conversationListUpdated'));
+    }
+  } catch (err) {
+    console.error('Erreur PATCH /groupes/:id/photo:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // Retirer un membre (admin seulement)

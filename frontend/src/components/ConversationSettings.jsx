@@ -78,6 +78,12 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
   const [tab, setTab] = useState(isGroupe ? 'membres' : 'couleur');
   const [newAdminId, setNewAdminId] = useState(null);
   const [showAdminPicker, setShowAdminPicker] = useState(false);
+  // Photo affichée tout de suite après un changement ; ignorée dès que la conversation (prop) a changé de photo
+  const [photoOverride, setPhotoOverride] = useState(null);
+  const currentPhoto = conversation.avatar_url || null;
+  const groupPhoto = photoOverride && photoOverride.base === currentPhoto ? photoOverride.value : currentPhoto;
+  const [photoMsg, setPhotoMsg] = useState('');
+  const [addError, setAddError] = useState('');
 
   const isAdmin = isGroupe && conversation.admin_id === currentUserId;
 
@@ -158,12 +164,46 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
   }
 
   async function addMember(userId) {
-    await fetch(`${API}/groupes/${conversation.id}/members`, {
+    const res = await fetch(`${API}/groupes/${conversation.id}/members`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ userId })
     });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setAddError(d.error || "Impossible d'ajouter ce membre");
+      return;
+    }
+    setAddError('');
     fetchMembers();
+  }
+
+  async function saveGroupPhoto(photoUrl) {
+    const res = await fetch(`${API}/groupes/${conversation.id}/photo`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ photo_url: photoUrl })
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setPhotoMsg(d.error || 'Erreur'); return; }
+    setPhotoOverride({ base: currentPhoto, value: d.avatar_url });
+    setPhotoMsg('');
+  }
+
+  async function handleGroupPhotoChange(e) {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API}/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!d.url) { setPhotoMsg(d.error || 'Erreur upload'); return; }
+    await saveGroupPhoto(d.url);
   }
 
   async function leaveGroupe() {
@@ -222,6 +262,28 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
           <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">✕</button>
         </div>
 
+        {isGroupe && (
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-700">
+            <label className="cursor-pointer relative group" title="Changer la photo du groupe">
+              <Avatar src={groupPhoto} name={conversation.name} size={56} group />
+              <span className="absolute inset-0 flex items-center justify-center text-white text-xs opacity-0 group-hover:opacity-100 bg-black/50 rounded-full">
+                Changer
+              </span>
+              <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+                onChange={handleGroupPhotoChange} />
+            </label>
+            <div className="min-w-0">
+              <p className="text-white text-sm font-semibold truncate">{conversation.name}</p>
+              {groupPhoto && (
+                <button onClick={() => saveGroupPhoto(null)} className="text-xs text-red-400 hover:text-red-300">
+                  Retirer la photo
+                </button>
+              )}
+              {photoMsg && <p className="text-xs text-red-400">{photoMsg}</p>}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-1 p-2 border-b border-gray-700">
           {tabs.map(t => (
             <button key={t} onClick={() => setTab(t)}
@@ -278,6 +340,7 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
           {tab === 'ajouter' && isGroupe && (
             <div className="space-y-2">
               {members.length >= 20 && <p className="text-yellow-400 text-sm">Groupe plein (20/20)</p>}
+              {addError && <p className="text-red-400 text-sm">{addError}</p>}
               {friends
                 .filter(f => !members.find(m => m.id === f.user_id))
                 .map(f => (
