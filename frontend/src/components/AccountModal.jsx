@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Avatar from './Avatar';
 import { useAuth } from '../context/AuthContext';
 
 export default function AccountModal({ onClose, onOpenSettings }) {
@@ -49,7 +50,7 @@ export default function AccountModal({ onClose, onOpenSettings }) {
       body: formData
     });
     const data = await res.json();
-    if (!data.url) return showMsg('Erreur upload', 'error');
+    if (!data.url) return showMsg(data.error || 'Erreur upload', 'error');
 
     // Sauvegarder l'URL relative en BDD, le backend la retournera préfixée
     const patchRes = await fetch(`${API}/me`, {
@@ -126,15 +127,17 @@ export default function AccountModal({ onClose, onOpenSettings }) {
             <>
               <div className="flex flex-col items-center gap-2">
                 <label className="cursor-pointer relative group">
-                  <img
-                    src={displayAvatar || '/default-avatar.png'}
-                    className="w-20 h-20 rounded-full object-cover border-2 border-gray-600 group-hover:opacity-70 transition-opacity"
-                    alt="avatar"
+                  <Avatar
+                    src={displayAvatar}
+                    name={pseudo}
+                    size={80}
+                    className="border-2 border-gray-600 group-hover:opacity-70 transition-opacity"
                   />
                   <span className="absolute inset-0 flex items-center justify-center text-white text-xs opacity-0 group-hover:opacity-100 bg-black/40 rounded-full">
                     Changer
                   </span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                  <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+                    onChange={async (e) => { await handleAvatarChange(e); e.target.value = ''; }} />
                 </label>
                 <span className="text-gray-400 text-sm">{pseudo}</span>
               </div>

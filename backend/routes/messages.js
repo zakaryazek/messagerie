@@ -31,6 +31,7 @@ router.get('/', checkMembership, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT m.*, COALESCE(u.pseudo, '[Utilisateur supprimé]') AS sender,
+        u.avatar_url AS sender_avatar_url,
         COALESCE(
           json_agg(
             json_build_object('emoji', r.emoji, 'count', r.cnt, 'reacted_by_me', r.reacted_by_me)
@@ -55,11 +56,15 @@ router.get('/', checkMembership, async (req, res) => {
          GROUP BY message_id, emoji
        ) r ON r.message_id = m.id
        WHERE m.groupe_id = $1 AND m.deleted_at IS NULL
-       GROUP BY m.id, u.pseudo, rp.id, rp.contenu, ru.pseudo
+       GROUP BY m.id, u.pseudo, u.avatar_url, rp.id, rp.contenu, ru.pseudo
        ORDER BY m.created_at ASC`,
       [groupeId, req.userId]
     );
-    const rows = result.rows.map(m => ({ ...m, attachment_url: fullUrl(m.attachment_url) }));
+    const rows = result.rows.map(m => ({
+      ...m,
+      attachment_url: fullUrl(m.attachment_url),
+      sender_avatar_url: fullUrl(m.sender_avatar_url)
+    }));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

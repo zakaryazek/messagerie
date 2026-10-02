@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import Avatar from './Avatar';
 import { useAuth } from '../context/AuthContext';
 import AccountModal from './AccountModal';
 import SettingsPanel from './SettingsPanel';
@@ -253,10 +254,11 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-white font-bold text-lg">ChatApp</h1>
           <button onClick={() => setShowAccount(true)} className="relative group">
-            <img
-              src={avatarUrl || '/default-avatar.png'}
-              className="w-9 h-9 rounded-full object-cover border-2 border-gray-600 hover:border-blue-500 transition-colors"
-              alt="Profil"
+            <Avatar
+              src={avatarUrl}
+              name={pseudo}
+              size={36}
+              className="border-2 border-gray-600 hover:border-blue-500 transition-colors"
             />
             {onlineUsers.has(userId) && (
               <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
@@ -315,9 +317,7 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
                   }`}
               >
                 <div className="relative flex-shrink-0">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${conv.type === 'group' ? 'bg-purple-600' : 'bg-blue-600'}`}>
-                    {conv.type === 'group' ? '#' : (conv.name || '?').slice(0, 1).toUpperCase()}
-                  </div>
+                  <Avatar src={conv.avatar_url} name={conv.name} size={40} group={conv.type === 'group'} />
                   {conv.type === 'dm' && onlineUsers.has(Number(conv.id)) && (
                     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900" />
                   )}
@@ -382,9 +382,9 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
             </div>
 
             {friendsTab === 'amis' && amis.map(a => (
-              <button key={a.user_id} onClick={() => onSelectConversation({ type: 'dm', id: a.user_id, name: a.pseudo })}
+              <button key={a.user_id} onClick={() => onSelectConversation({ type: 'dm', id: a.user_id, name: a.pseudo, avatar_url: a.avatar_url })}
                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg transition-colors">
-                <img src={a.avatar_url || '/default-avatar.png'} className="w-8 h-8 rounded-full" />
+                <Avatar src={a.avatar_url} name={a.pseudo} size={32} />
                 <span className="text-white text-sm">{a.pseudo}</span>
               </button>
             ))}
@@ -486,10 +486,10 @@ export default function Sidebar({ activeConversation, onSelectConversation, refr
             <div className="max-h-60 overflow-y-auto">
               {amis.map(f => (
                 <button key={f.user_id}
-                  onClick={() => { onSelectConversation({ type: 'dm', id: f.user_id, name: f.pseudo }); setShowNewDM(false); }}
+                  onClick={() => { onSelectConversation({ type: 'dm', id: f.user_id, name: f.pseudo, avatar_url: f.avatar_url }); setShowNewDM(false); }}
                   className="w-full text-left flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors">
                   <div className="relative">
-                    <img src={f.avatar_url || '/default-avatar.png'} className="w-10 h-10 rounded-full object-cover" />
+                    <Avatar src={f.avatar_url} name={f.pseudo} size={40} />
                     {onlineUsers.has(f.user_id) && (
                       <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900" />
                     )}

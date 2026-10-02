@@ -1,5 +1,6 @@
 const express = require('express');
 const pool = require('../db');
+const { fullUrl } = require('../utils/url');
 const authMiddleware = require('../middleware/auth');
 
 module.exports = function(io) {
@@ -16,6 +17,7 @@ module.exports = function(io) {
             'group' AS type,
             g.id,
             g.nom AS name,
+            g.photo_url AS avatar_url,
             g.created_at,
             g.created_by,
             gu.role,
@@ -54,6 +56,7 @@ module.exports = function(io) {
             'dm' AS type,
             other_u.id,
             other_u.pseudo AS name,
+            other_u.avatar_url AS avatar_url,
             NULL::timestamp AS created_at,
             NULL::integer AS created_by,
             NULL::varchar AS role,
@@ -97,7 +100,7 @@ module.exports = function(io) {
         ORDER BY last_message_at DESC NULLS LAST`,
         [req.userId]
       );
-      res.json(result.rows);
+      res.json(result.rows.map(c => ({ ...c, avatar_url: fullUrl(c.avatar_url) })));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Erreur serveur' });

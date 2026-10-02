@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { fullUrl } = require('../utils/url');
 const authMiddleware = require('../middleware/auth');
 
 let _io = null; // Variable pour stocker l'instance io
@@ -35,7 +36,8 @@ router.get('/', async (req, res) => {
          f.statut,
          f.created_at,
          u.id AS user_id,
-         u.pseudo
+         u.pseudo,
+         u.avatar_url
        FROM friendships f
        JOIN users u ON u.id = CASE
          WHEN f.demandeur_id = $1 THEN f.receveur_id
@@ -51,14 +53,16 @@ router.get('/', async (req, res) => {
          f.id,
          f.created_at,
          u.id AS user_id,
-         u.pseudo
+         u.pseudo,
+         u.avatar_url
        FROM friendships f
        JOIN users u ON u.id = f.demandeur_id
        WHERE f.receveur_id = $1 AND f.statut = 'pending'`,
       [req.userId]
     );
 
-    res.json({ amis: amis.rows, demandes: demandes.rows });
+    const withAvatar = (u) => ({ ...u, avatar_url: fullUrl(u.avatar_url) });
+    res.json({ amis: amis.rows.map(withAvatar), demandes: demandes.rows.map(withAvatar) });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -115,7 +119,7 @@ router.get('/pending', authMiddleware, async (req, res) => {
        WHERE f.demandeur_id = $1 AND f.statut = 'pending'`,
       [req.userId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(u => ({ ...u, avatar_url: fullUrl(u.avatar_url) })));
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

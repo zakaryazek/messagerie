@@ -7,7 +7,8 @@ module.exports = (req, res, next) => {
   if (!token) return res.status(401).json({ error: 'Token manquant' });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Algorithme imposé : on refuse tout token signé autrement que HS256
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     req.userId = decoded.userId;
     next();
   } catch (err) {

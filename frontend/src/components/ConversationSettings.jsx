@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Avatar from './Avatar';
 import { useAuth } from '../context/AuthContext';
 import socket from '../socket';
 
@@ -238,7 +239,7 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
               {members.map(m => (
                 <div key={m.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <img src={m.avatar_url || '/default-avatar.png'} className="w-8 h-8 rounded-full" />
+                    <Avatar src={m.avatar_url} name={m.pseudo} size={32} />
                     <span className="text-white text-sm">{m.pseudo}</span>
                     {m.id === conversation.admin_id && (
                       <span className="text-xs text-yellow-400 bg-yellow-900/30 px-1 rounded">admin</span>

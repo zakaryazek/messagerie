@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { fullUrl } = require('../utils/url');
 const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -12,7 +13,7 @@ router.get('/', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT id, pseudo, created_at
+      `SELECT id, pseudo, avatar_url, created_at
        FROM users
        WHERE pseudo ILIKE $1
          AND id != $2
@@ -25,7 +26,7 @@ router.get('/', async (req, res) => {
        LIMIT 10`,
       [`%${search}%`, req.userId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(u => ({ ...u, avatar_url: fullUrl(u.avatar_url) })));
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }

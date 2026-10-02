@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Avatar from './Avatar';
 import { useAuth } from '../context/AuthContext';
 import socket from '../socket';
 import MessageItem from './MessageItem';
@@ -483,9 +484,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     <div className={`flex-1 flex flex-col min-w-0 relative ${chatBackground?.startsWith('animated:') ? '' : 'bg-gray-950'}`}>
       <div className="px-5 py-4 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10">
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold ${isGroup ? 'bg-purple-600' : 'bg-indigo-600'}`}>
-            {isGroup ? '#' : conversation.name?.slice(0, 1).toUpperCase()}
-          </div>
+          <Avatar src={conversation.avatar_url} name={conversation.name} size={36} group={isGroup} />
           <h2 className="text-white font-bold">{isGroup ? conversation.name : `@${conversation.name}`}</h2>
         </div>
         <button onClick={() => setShowSettings(true)}

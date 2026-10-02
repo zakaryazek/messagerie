@@ -4,3 +4,7 @@ dist/
 backend/uploads/*
 !backend/uploads/.gitkeep
 *.sql
+*.zip
+*.sh
+SUIVI_MODIFICATIONS.md
+*.patch

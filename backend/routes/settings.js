@@ -11,7 +11,29 @@ function getRoom(conversationKey) {
   return conversationKey;
 }
 
-router.get('/bubble', async (req, res) => {
+// Vérifie que l'utilisateur fait bien partie de la conversation désignée par la clé
+// ('groupe_X' ou 'dm_MIN_MAX'). La clé est lue dans ?key= ou dans le body (conversationKey).
+async function requireConversation(req, res, next) {
+  const key = req.query.key || req.body?.conversationKey;
+  if (typeof key !== 'string') return res.status(400).json({ error: 'key manquant' });
+  try {
+    let ok = false;
+    let m;
+    if ((m = /^groupe_(\d{1,9})$/.exec(key))) {
+      const r = await pool.query(
+        'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [Number(m[1]), req.userId]
+      );
+      ok = r.rows.length > 0;
+    } else if ((m = /^dm_(\d{1,9})_(\d{1,9})$/.exec(key))) {
+      const a = Number(m[1]), b = Number(m[2]);
+      ok = a < b && (a === req.userId || b === req.userId);
+    }
+    if (!ok) return res.status(403).json({ error: 'Accès refusé' });
+    next();
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+}
+
+router.get('/bubble', requireConversation, async (req, res) => {
   const { key } = req.query;
   try {
     const color = await pool.query(
@@ -29,7 +51,7 @@ router.get('/bubble', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.get('/bubble/other', async (req, res) => {
+router.get('/bubble/other', requireConversation, async (req, res) => {
   const { key, otherUserId } = req.query;
   if (!key || !otherUserId) return res.status(400).json({ error: 'Paramètres manquants' });
   try {
@@ -41,8 +63,9 @@ router.get('/bubble/other', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/bubble', async (req, res) => {
+router.post('/bubble', requireConversation, async (req, res) => {
   const { conversationKey, color } = req.body;
+  if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Couleur invalide' });
   try {
     await pool.query(
       `INSERT INTO bubble_colors (user_id, conversation_key, color)
@@ -58,8 +81,9 @@ router.post('/bubble', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/background', async (req, res) => {
+router.post('/background', requireConversation, async (req, res) => {
   const { conversationKey, background } = req.body;
+  if (typeof background !== 'string' || background.length === 0 || background.length > 100) return res.status(400).json({ error: 'Fond invalide' });
   try {
     await pool.query(
       `INSERT INTO chat_backgrounds (user_id, conversation_key, background)
@@ -75,7 +99,7 @@ router.post('/background', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.get('/pinned', async (req, res) => {
+router.get('/pinned', requireConversation, async (req, res) => {
   const { key } = req.query;
   if (!key) return res.status(400).json({ error: 'key manquant' });
   try {

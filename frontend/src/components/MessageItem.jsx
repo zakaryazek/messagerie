@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Avatar from './Avatar';
 import socket from '../socket';
 
 const EMOJIS = ['👍','❤️','😂','😮','😢','🔥'];
@@ -44,6 +45,16 @@ export default function MessageItem({ msg, conversation, currentUserId, onReply,
 
       {/* Wrapper bulle + menu côte à côte */}
       <div className={`flex items-center gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+
+        {/* Photo de l'expéditeur (messages des autres) */}
+        {!isOwn && (
+          <Avatar
+            src={conversation.type === 'group' ? msg.sender_avatar_url : conversation.avatar_url}
+            name={msg.sender}
+            size={28}
+            className="self-end mb-0.5 mr-1"
+          />
+        )}
 
         {/* Bulle */}
         <div

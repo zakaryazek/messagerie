@@ -1,15 +1,31 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
+const { updateMeSchema, validate } = require('../validation');
 router.use(authMiddleware);
 
+const BCRYPT_ROUNDS = 12;
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+
 function fullUrl(url) {
   if (!url) return null;
   if (url.startsWith('http')) return url;
   return API_BASE + url;
+}
+
+// Une image de profil doit être un fichier uploadé chez nous (jamais une URL externe).
+// Renvoie le chemin relatif (/uploads/xxx.png), null pour supprimer l'image, undefined si invalide.
+function normalizeAvatar(url) {
+  if (url === null || url === '') return null;
+  const rel = url.startsWith(API_BASE + '/') ? url.slice(API_BASE.length) : url;
+  if (!/^\/uploads\/[^/\\?#]+$/.test(rel) || rel.includes('..')) return undefined;
+  if (!fs.existsSync(path.join(UPLOADS_DIR, path.basename(rel)))) return undefined;
+  return rel;
 }
 
 // GET /me
@@ -23,16 +39,21 @@ router.get('/', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
     res.json({ ...user, avatar_url: fullUrl(user.avatar_url) });
   } catch (err) {
+    console.error('Erreur GET /me:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
 // PATCH /me — pseudo, email, mot de passe, avatar_url, theme
 router.patch('/', async (req, res) => {
-  const { pseudo, email, currentPassword, newPassword, avatar_url, theme } = req.body;
+  const v = validate(updateMeSchema, req.body);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const { pseudo, email, currentPassword, newPassword, avatar_url, theme } = v.data;
+
   try {
     const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
     const user = userResult.rows[0];
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const updates = [];
     const values = [];
     let i = 1;
@@ -51,13 +72,15 @@ router.patch('/', async (req, res) => {
       if (!currentPassword) return res.status(400).json({ error: 'Mot de passe actuel requis' });
       const valid = await bcrypt.compare(currentPassword, user.password_hash);
       if (!valid) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
-      const hash = await bcrypt.hash(newPassword, 10);
+      const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
       updates.push(`password_hash = $${i++}`); values.push(hash);
     }
     if (avatar_url !== undefined) {
-      updates.push(`avatar_url = $${i++}`); values.push(avatar_url);
+      const avatar = normalizeAvatar(avatar_url);
+      if (avatar === undefined) return res.status(400).json({ error: 'Image de profil invalide' });
+      updates.push(`avatar_url = $${i++}`); values.push(avatar);
     }
-    if (theme && ['system', 'light', 'dark'].includes(theme)) {
+    if (theme) {
       updates.push(`theme = $${i++}`); values.push(theme);
     }
 
@@ -71,6 +94,12 @@ router.patch('/', async (req, res) => {
     const updated = result.rows[0];
     res.json({ ...updated, avatar_url: fullUrl(updated.avatar_url) });
   } catch (err) {
+    // Deux requêtes simultanées peuvent passer la vérification ci-dessus : la base tranche
+    if (err.code === '23505') {
+      if (err.detail?.includes('pseudo')) return res.status(409).json({ error: 'Pseudo déjà utilisé' });
+      if (err.detail?.includes('email')) return res.status(409).json({ error: 'Email déjà utilisé' });
+    }
+    console.error('Erreur PATCH /me:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -83,6 +112,7 @@ router.patch('/status', async (req, res) => {
     await pool.query('UPDATE users SET status = $1 WHERE id = $2', [status, req.userId]);
     res.json({ status });
   } catch (err) {
+    console.error('Erreur PATCH /me/status:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -92,7 +122,10 @@ router.delete('/', async (req, res) => {
   try {
     await pool.query(`DELETE FROM users WHERE id = $1`, [req.userId]);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+  } catch (err) {
+    console.error('Erreur DELETE /me:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 module.exports = router;

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { fullUrl } = require('../utils/url');
 const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -107,7 +108,10 @@ router.delete('/:id', async (req, res) => {
     await client.query('DELETE FROM groupes WHERE id = $1', [groupeId]);
     await client.query('COMMIT');
     res.json({ message: 'Groupe supprimé' });
-    if (_io) _io.emit('groupeDeleted', { groupeId });
+    if (_io) {
+      _io.in('groupe_' + groupeId).socketsLeave('groupe_' + groupeId);
+      _io.emit('groupeDeleted', { groupeId });
+    }
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Erreur serveur' });
@@ -116,9 +120,15 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Liste des membres avec leur couleur de bulle
+// Liste des membres avec leur couleur de bulle (réservé aux membres du groupe)
 router.get('/:id/members', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  if (isNaN(groupeId)) return res.status(400).json({ error: 'ID invalide' });
   try {
+    const member = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
+    );
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
     const result = await pool.query(
       `SELECT u.id, u.pseudo, u.avatar_url,
        bc.color as bubble_color
@@ -127,69 +137,106 @@ router.get('/:id/members', authMiddleware, async (req, res) => {
        LEFT JOIN bubble_colors bc ON bc.user_id = u.id 
          AND bc.conversation_key = $2
        WHERE gu.groupe_id = $1`,
-      [req.params.id, 'groupe_' + req.params.id]
+      [groupeId, 'groupe_' + groupeId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(m => ({ ...m, avatar_url: fullUrl(m.avatar_url) })));
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-// Ajouter un membre
+// Ajouter un membre (admin seulement)
 router.post('/:id/members', authMiddleware, async (req, res) => {
-  const { userId } = req.body;
+  const groupeId = parseInt(req.params.id);
+  const userId = parseInt(req.body?.userId);
+  if (isNaN(groupeId) || isNaN(userId)) return res.status(400).json({ error: 'ID invalide' });
   try {
+    const admin = await pool.query(
+      'SELECT 1 FROM groupes WHERE id = $1 AND admin_id = $2', [groupeId, req.userId]
+    );
+    if (admin.rows.length === 0) return res.status(403).json({ error: 'Non autorisé' });
+    const user = await pool.query('SELECT 1 FROM users WHERE id = $1', [userId]);
+    if (user.rows.length === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const count = await pool.query(
-      'SELECT COUNT(*) FROM groupe_users WHERE groupe_id = $1', [req.params.id]
+      'SELECT COUNT(*) FROM groupe_users WHERE groupe_id = $1', [groupeId]
     );
     if (parseInt(count.rows[0].count) >= 20)
       return res.status(400).json({ error: 'Groupe plein' });
     await pool.query(
       'INSERT INTO groupe_users (groupe_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [req.params.id, userId]
+      [groupeId, userId]
     );
     res.json({ success: true });
-    if (_io) _io.emit('addedToGroupe', { groupeId: Number(req.params.id), userId: Number(userId) });
+    if (_io) _io.emit('addedToGroupe', { groupeId, userId });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
 // Retirer un membre (admin seulement)
 router.delete('/:id/members/:userId', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  const targetId = parseInt(req.params.userId);
+  if (isNaN(groupeId) || isNaN(targetId)) return res.status(400).json({ error: 'ID invalide' });
   try {
-    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [req.params.id]);
+    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [groupeId]);
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
     if (groupe.rows[0].admin_id !== req.userId)
       return res.status(403).json({ error: 'Non autorisé' });
-    await pool.query(
-      'DELETE FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
-      [req.params.id, req.params.userId]
+    if (targetId === req.userId)
+      return res.status(400).json({ error: "L'admin doit passer par « quitter le groupe »" });
+    const removed = await pool.query(
+      'DELETE FROM groupe_users WHERE groupe_id = $1 AND user_id = $2 RETURNING user_id',
+      [groupeId, targetId]
     );
+    if (removed.rows.length === 0)
+      return res.status(404).json({ error: 'Ce membre ne fait pas partie du groupe' });
     // Message système
     await pool.query(
       'INSERT INTO messages (contenu, groupe_id) VALUES ($1, $2)',
-      ['Un membre a été retiré du groupe.', req.params.id]
+      ['Un membre a été retiré du groupe.', groupeId]
     );
     res.json({ success: true });
-    if (_io) _io.emit('removedFromGroupe', { groupeId: Number(req.params.id), userId: Number(req.params.userId) });
+    if (_io) {
+      // Le membre retiré ne doit plus recevoir les messages en direct
+      _io.in('user_' + targetId).socketsLeave('groupe_' + groupeId);
+      _io.emit('removedFromGroupe', { groupeId, userId: targetId });
+    }
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
 // Quitter un groupe
 router.post('/:id/leave', authMiddleware, async (req, res) => {
-  const { newAdminId } = req.body;
+  const groupeId = parseInt(req.params.id);
+  const newAdminId = parseInt(req.body?.newAdminId);
+  if (isNaN(groupeId)) return res.status(400).json({ error: 'ID invalide' });
   try {
-    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [req.params.id]);
+    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [groupeId]);
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    const member = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
+    );
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
+
     if (groupe.rows[0].admin_id === req.userId) {
-      if (!newAdminId) return res.status(400).json({ error: 'Nouvel admin requis' });
-      await pool.query('UPDATE groupes SET admin_id = $1 WHERE id = $2', [newAdminId, req.params.id]);
+      if (isNaN(newAdminId)) return res.status(400).json({ error: 'Nouvel admin requis' });
+      // Le nouvel admin doit être un autre membre du groupe
+      const heir = await pool.query(
+        'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, newAdminId]
+      );
+      if (newAdminId === req.userId || heir.rows.length === 0)
+        return res.status(400).json({ error: 'Nouvel admin invalide' });
+      await pool.query('UPDATE groupes SET admin_id = $1 WHERE id = $2', [newAdminId, groupeId]);
       await pool.query(
         `UPDATE groupe_users SET role = 'admin' WHERE groupe_id = $1 AND user_id = $2`,
-        [req.params.id, newAdminId]
+        [groupeId, newAdminId]
       );
     }
     await pool.query(
       'DELETE FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
+      [groupeId, req.userId]
     );
     res.json({ success: true });
-    if (_io) _io.emit('groupeLeft', { groupeId: Number(req.params.id), userId: Number(req.userId) });
+    if (_io) {
+      _io.in('user_' + req.userId).socketsLeave('groupe_' + groupeId);
+      _io.emit('groupeLeft', { groupeId, userId: Number(req.userId) });
+    }
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
