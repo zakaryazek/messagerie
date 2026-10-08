@@ -132,6 +132,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
   const [typingUsers, setTypingUsers] = useState([]);
   const [pinnedMsg, setPinnedMsg] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingReq, setPendingReq] = useState({ id: null, count: 0 });
   const [myBubbleColor, setMyBubbleColor] = useState('#3B82F6');
   const [chatBackground, setChatBackground] = useState(null);
   const [membersColors, setMembersColors] = useState({});
@@ -140,6 +141,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimeout = useRef(null);
+  const typingTimers = useRef({});
 
   const isGroup = conversation?.type === 'group';
 
@@ -350,20 +352,35 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
       if (ck !== convKey) return;
       setChatBackground(bg === 'default' ? null : bg);
     });
-    socket.on('userTyping', ({ userId: uid }) => {
-      if (Number(uid) !== Number(userId)) setTypingUsers(prev => prev.includes(uid) ? prev : [...prev, uid]);
-    });
-    socket.on('userStopTyping', ({ userId: uid }) => {
-      setTypingUsers(prev => prev.filter(id => id !== uid));
-    });
-    socket.on('userTypingDM', ({ userId: uid }) => {
-      if (Number(uid) !== Number(userId)) setTypingUsers(prev => prev.includes(uid) ? prev : [...prev, uid]);
-    });
-    socket.on('userStopTypingDM', ({ userId: uid }) => {
-      setTypingUsers(prev => prev.filter(id => id !== uid));
-    });
+    const clearTyping = (uid) => {
+      const key = Number(uid);
+      clearTimeout(typingTimers.current[key]);
+      delete typingTimers.current[key];
+      setTypingUsers(prev => prev.filter(id => id !== key));
+    };
+    const markTyping = (uid) => {
+      const key = Number(uid);
+      if (key === Number(userId)) return;
+      setTypingUsers(prev => prev.includes(key) ? prev : [...prev, key]);
+      clearTimeout(typingTimers.current[key]);
+      // filet de sécurité : sans signal pendant 4 s, l'indicateur disparaît
+      typingTimers.current[key] = setTimeout(() => clearTyping(key), 4000);
+    };
+    socket.on('userTyping', ({ userId: uid }) => markTyping(uid));
+    socket.on('userStopTyping', ({ userId: uid }) => clearTyping(uid));
+    socket.on('userTypingDM', ({ userId: uid }) => markTyping(uid));
+    socket.on('userStopTypingDM', ({ userId: uid }) => clearTyping(uid));
 
     return () => {
+      if (typingTimeout.current) {
+        clearTimeout(typingTimeout.current);
+        typingTimeout.current = null;
+        if (isGroup) socket.emit('stopTyping', { groupeId: convId });
+        else socket.emit('stopTypingDM', { otherId: convId });
+      }
+      Object.values(typingTimers.current).forEach(clearTimeout);
+      typingTimers.current = {};
+      setTypingUsers([]);
       if (isGroup) socket.emit('leaveRoom', convId);
       else socket.emit('leaveDM', convId);
       socket.off('newMessage'); socket.off('newPrivateMessage');
@@ -394,13 +411,25 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     return () => socket.off('allDMRead', handleAllDMRead);
   }, [userId]);
 
+  const stopTypingNow = () => {
+    if (!typingTimeout.current) return;
+    clearTimeout(typingTimeout.current);
+    typingTimeout.current = null;
+    const convId = Number(conversation.id);
+    if (isGroup) socket.emit('stopTyping', { groupeId: convId });
+    else socket.emit('stopTypingDM', { otherId: convId });
+  };
+
   const handleInputChange = (e) => {
-    setInputValue(e.target.value);
+    const value = e.target.value;
+    setInputValue(value);
+    if (!value) { stopTypingNow(); return; }
     const convId = Number(conversation.id);
     if (isGroup) socket.emit('typing', { groupeId: convId });
     else socket.emit('typingDM', { otherId: convId });
     clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => {
+      typingTimeout.current = null;
       if (isGroup) socket.emit('stopTyping', { groupeId: convId });
       else socket.emit('stopTypingDM', { otherId: convId });
     }, 2000);
@@ -410,6 +439,7 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     if (e) e.preventDefault();
     if (!inputValue.trim() && !pendingFile) return;
 
+    stopTypingNow();
     const convId = Number(conversation.id);
 
     if (editingMsg) {
@@ -474,6 +504,25 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Admin d'un groupe : nombre de demandes d'ajout en attente (pastille sur la roue des paramètres)
+  const adminGroupId = isGroup && Number(conversation?.admin_id) === Number(userId) ? conversation.id : null;
+  useEffect(() => {
+    if (!adminGroupId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`${API}/groupes/${adminGroupId}/add-requests`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (!cancelled) setPendingReq({ id: adminGroupId, count: Array.isArray(data) ? data.length : 0 });
+      } catch { /* pastille facultative */ }
+    };
+    load();
+    const onChange = ({ groupeId }) => { if (Number(groupeId) === Number(adminGroupId)) load(); };
+    socket.on('addRequestsChanged', onChange);
+    return () => { cancelled = true; socket.off('addRequestsChanged', onChange); };
+  }, [adminGroupId, token]);
+  const pendingRequestsCount = adminGroupId && pendingReq.id === adminGroupId ? pendingReq.count : 0;
+
   if (!conversation) return (
     <div className="flex-1 flex items-center justify-center bg-gray-950 text-gray-500">
       Sélectionne une conversation
@@ -488,7 +537,13 @@ export default function ChatPanel({ conversation, onGroupDeleted }) {
           <h2 className="text-white font-bold">{isGroup ? conversation.name : `@${conversation.name}`}</h2>
         </div>
         <button onClick={() => setShowSettings(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
+          aria-label={pendingRequestsCount > 0 ? `Paramètres (${pendingRequestsCount} demande(s) d'ajout)` : 'Paramètres'}
+          className="relative w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
+          {pendingRequestsCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+              {pendingRequestsCount}
+            </span>
+          )}
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

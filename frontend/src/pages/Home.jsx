@@ -13,8 +13,17 @@ export default function Home() {
       setActiveConversation(c =>
         c && c.type === 'group' && Number(c.id) === Number(groupeId) ? { ...c, avatar_url } : c
       );
+    // L'admin change le réglage « validation des ajouts » du groupe ouvert
+    const onSettings = ({ groupeId, add_requires_approval }) =>
+      setActiveConversation(c =>
+        c && c.type === 'group' && Number(c.id) === Number(groupeId) ? { ...c, add_requires_approval } : c
+      );
     socket.on('groupePhotoChanged', onPhoto);
-    return () => socket.off('groupePhotoChanged', onPhoto);
+    socket.on('groupeSettingsChanged', onSettings);
+    return () => {
+      socket.off('groupePhotoChanged', onPhoto);
+      socket.off('groupeSettingsChanged', onSettings);
+    };
   }, []);
 
   function handleGroupDeleted() {

@@ -6,6 +6,8 @@ const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
 
+const MAX_MEMBERS = 20;
+
 // POST /groupes — créer un groupe
 router.post('/', async (req, res) => {
   const { nom, members } = req.body;
@@ -72,8 +74,11 @@ router.get('/', async (req, res) => {
 router.post('/:id/join', async (req, res) => {
   const groupeId = parseInt(req.params.id);
   try {
-    const groupe = await pool.query('SELECT id FROM groupes WHERE id = $1', [groupeId]);
+    const groupe = await pool.query('SELECT id, add_requires_approval FROM groupes WHERE id = $1', [groupeId]);
     if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    // Si l'admin exige de valider les ajouts, on ne peut pas contourner en rejoignant soi-même
+    if (groupe.rows[0].add_requires_approval)
+      return res.status(403).json({ error: "Ce groupe demande la validation de son admin pour y entrer" });
 
     const existing = await pool.query(
       'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2',
@@ -143,7 +148,13 @@ router.get('/:id/members', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-// Ajouter un membre (tout membre du groupe peut le faire)
+// Prévient un groupe en direct (chat ouvert) et recharge la liste de conversations de ses membres
+async function notifyGroupe(groupeId, event, payload) {
+  if (!_io) return;
+  _io.to('groupe_' + groupeId).emit(event, payload);
+}
+
+// Ajouter un membre : direct, ou sous forme de demande si l'admin exige une validation
 router.post('/:id/members', authMiddleware, async (req, res) => {
   const groupeId = parseInt(req.params.id);
   const userId = parseInt(req.body?.userId);
@@ -153,20 +164,163 @@ router.post('/:id/members', authMiddleware, async (req, res) => {
       'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
     );
     if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
+
+    const groupe = await pool.query(
+      'SELECT admin_id, add_requires_approval FROM groupes WHERE id = $1', [groupeId]
+    );
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    const { admin_id, add_requires_approval } = groupe.rows[0];
+
     const user = await pool.query('SELECT 1 FROM users WHERE id = $1', [userId]);
     if (user.rows.length === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
-    const count = await pool.query(
-      'SELECT COUNT(*) FROM groupe_users WHERE groupe_id = $1', [groupeId]
+    const already = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, userId]
     );
-    if (parseInt(count.rows[0].count) >= 20)
+    if (already.rows.length > 0) return res.status(409).json({ error: 'Déjà membre du groupe' });
+
+    const count = await pool.query('SELECT COUNT(*) FROM groupe_users WHERE groupe_id = $1', [groupeId]);
+    if (parseInt(count.rows[0].count) >= MAX_MEMBERS)
       return res.status(400).json({ error: 'Groupe plein' });
+
+    // Option cochée : tout ajout par un autre que l'admin devient une demande à valider
+    if (add_requires_approval && admin_id !== req.userId) {
+      const created = await pool.query(
+        `INSERT INTO groupe_add_requests (groupe_id, user_id, requested_by) VALUES ($1, $2, $3)
+         ON CONFLICT (groupe_id, user_id) DO NOTHING RETURNING id`,
+        [groupeId, userId, req.userId]
+      );
+      if (created.rows.length > 0) await notifyGroupe(groupeId, 'addRequestsChanged', { groupeId });
+      return res.status(202).json({ pending: true, alreadyRequested: created.rows.length === 0 });
+    }
+
     await pool.query(
       'INSERT INTO groupe_users (groupe_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [groupeId, userId]
     );
+    // Une éventuelle demande en attente pour cette personne n'a plus lieu d'être
+    await pool.query('DELETE FROM groupe_add_requests WHERE groupe_id = $1 AND user_id = $2', [groupeId, userId]);
     res.json({ success: true });
-    if (_io) _io.emit('addedToGroupe', { groupeId, userId });
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+    if (_io) {
+      _io.emit('addedToGroupe', { groupeId, userId });
+      await notifyGroupe(groupeId, 'addRequestsChanged', { groupeId });
+    }
+  } catch (err) {
+    console.error('Erreur POST /groupes/:id/members:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Réglages du groupe (admin) : obliger la validation des ajouts par l'admin
+router.patch('/:id/settings', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  if (isNaN(groupeId)) return res.status(400).json({ error: 'ID invalide' });
+  const value = req.body?.add_requires_approval;
+  if (typeof value !== 'boolean') return res.status(400).json({ error: 'add_requires_approval doit être true ou false' });
+  try {
+    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [groupeId]);
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    if (groupe.rows[0].admin_id !== req.userId) return res.status(403).json({ error: "Seul l'admin peut modifier ce réglage" });
+
+    await pool.query('UPDATE groupes SET add_requires_approval = $1 WHERE id = $2', [value, groupeId]);
+    res.json({ add_requires_approval: value });
+    if (_io) {
+      await notifyGroupe(groupeId, 'groupeSettingsChanged', { groupeId, add_requires_approval: value });
+      const members = await pool.query('SELECT user_id FROM groupe_users WHERE groupe_id = $1', [groupeId]);
+      members.rows.forEach(({ user_id }) => _io.to('user_' + user_id).emit('conversationListUpdated'));
+    }
+  } catch (err) {
+    console.error('Erreur PATCH /groupes/:id/settings:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Demandes d'ajout en attente (visibles par les membres du groupe ; seule l'admin peut les traiter)
+router.get('/:id/add-requests', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  if (isNaN(groupeId)) return res.status(400).json({ error: 'ID invalide' });
+  try {
+    const member = await pool.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, req.userId]
+    );
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Non membre du groupe' });
+    const result = await pool.query(
+      `SELECT r.id, r.user_id, u.pseudo, u.avatar_url,
+              r.requested_by, COALESCE(rb.pseudo, '[Utilisateur supprimé]') AS requested_by_pseudo, r.created_at
+       FROM groupe_add_requests r
+       JOIN users u ON u.id = r.user_id
+       LEFT JOIN users rb ON rb.id = r.requested_by
+       WHERE r.groupe_id = $1
+       ORDER BY r.created_at ASC`,
+      [groupeId]
+    );
+    res.json(result.rows.map(r => ({ ...r, avatar_url: fullUrl(r.avatar_url) })));
+  } catch (err) {
+    console.error('Erreur GET /groupes/:id/add-requests:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Admin : accepter une demande d'ajout
+router.post('/:id/add-requests/:requestId/approve', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  const requestId = parseInt(req.params.requestId);
+  if (isNaN(groupeId) || isNaN(requestId)) return res.status(400).json({ error: 'ID invalide' });
+  const client = await pool.connect();
+  try {
+    const groupe = await client.query('SELECT admin_id FROM groupes WHERE id = $1', [groupeId]);
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    if (groupe.rows[0].admin_id !== req.userId) return res.status(403).json({ error: "Seul l'admin peut valider une demande" });
+
+    await client.query('BEGIN');
+    const reqRow = await client.query(
+      'SELECT user_id FROM groupe_add_requests WHERE id = $1 AND groupe_id = $2 FOR UPDATE', [requestId, groupeId]
+    );
+    if (reqRow.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Demande introuvable (déjà traitée ?)' }); }
+    const targetId = reqRow.rows[0].user_id;
+
+    const already = await client.query(
+      'SELECT 1 FROM groupe_users WHERE groupe_id = $1 AND user_id = $2', [groupeId, targetId]
+    );
+    if (already.rows.length === 0) {
+      const count = await client.query('SELECT COUNT(*) FROM groupe_users WHERE groupe_id = $1', [groupeId]);
+      if (parseInt(count.rows[0].count) >= MAX_MEMBERS) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Groupe plein' }); }
+      await client.query('INSERT INTO groupe_users (groupe_id, user_id) VALUES ($1, $2)', [groupeId, targetId]);
+    }
+    await client.query('DELETE FROM groupe_add_requests WHERE id = $1', [requestId]);
+    await client.query('COMMIT');
+    res.json({ success: true, userId: targetId });
+    if (_io) {
+      _io.emit('addedToGroupe', { groupeId, userId: targetId });
+      await notifyGroupe(groupeId, 'addRequestsChanged', { groupeId });
+    }
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Erreur approve add-request:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin : refuser une demande d'ajout
+router.post('/:id/add-requests/:requestId/reject', authMiddleware, async (req, res) => {
+  const groupeId = parseInt(req.params.id);
+  const requestId = parseInt(req.params.requestId);
+  if (isNaN(groupeId) || isNaN(requestId)) return res.status(400).json({ error: 'ID invalide' });
+  try {
+    const groupe = await pool.query('SELECT admin_id FROM groupes WHERE id = $1', [groupeId]);
+    if (groupe.rows.length === 0) return res.status(404).json({ error: 'Groupe introuvable' });
+    if (groupe.rows[0].admin_id !== req.userId) return res.status(403).json({ error: "Seul l'admin peut refuser une demande" });
+    const removed = await pool.query(
+      'DELETE FROM groupe_add_requests WHERE id = $1 AND groupe_id = $2 RETURNING id', [requestId, groupeId]
+    );
+    if (removed.rows.length === 0) return res.status(404).json({ error: 'Demande introuvable (déjà traitée ?)' });
+    res.json({ success: true });
+    await notifyGroupe(groupeId, 'addRequestsChanged', { groupeId });
+  } catch (err) {
+    console.error('Erreur reject add-request:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // Changer la photo du groupe (tout membre du groupe peut le faire ; null = retirer la photo)

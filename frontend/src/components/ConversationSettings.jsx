@@ -4,60 +4,60 @@ import { useAuth } from '../context/AuthContext';
 import socket from '../socket';
 
 const BUBBLE_COLORS = [
-  '#3B82F6','#EF4444','#10B981','#F59E0B',
-  '#8B5CF6','#EC4899','#06B6D4','#84CC16',
-  '#F97316','#6366F1','#14B8A6','#E11D48'
+  '#3B82F6', '#EF4444', '#10B981', '#F59E0B',
+  '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
+  '#F97316', '#6366F1', '#14B8A6', '#E11D48'
 ];
 
 const BACKGROUNDS = [
   { label: 'Défaut', value: 'default', group: 'default' },
 
   // Clair · Couleurs
-  { label: 'Bleu clair',    value: '#BFDBFE', group: 'clair-fixe' },
-  { label: 'Vert clair',    value: '#BBF7D0', group: 'clair-fixe' },
-  { label: 'Rose',          value: '#FBCFE8', group: 'clair-fixe' },
-  { label: 'Jaune',         value: '#FDE68A', group: 'clair-fixe' },
-  { label: 'Violet clair',  value: '#DDD6FE', group: 'clair-fixe' },
-  { label: 'Pêche',         value: '#FED7AA', group: 'clair-fixe' },
-  { label: 'Turquoise',     value: '#99F6E4', group: 'clair-fixe' },
-  { label: 'Rouge pâle',    value: '#FECACA', group: 'clair-fixe' },
+  { label: 'Bleu clair', value: '#BFDBFE', group: 'clair-fixe' },
+  { label: 'Vert clair', value: '#BBF7D0', group: 'clair-fixe' },
+  { label: 'Rose', value: '#FBCFE8', group: 'clair-fixe' },
+  { label: 'Jaune', value: '#FDE68A', group: 'clair-fixe' },
+  { label: 'Violet clair', value: '#DDD6FE', group: 'clair-fixe' },
+  { label: 'Pêche', value: '#FED7AA', group: 'clair-fixe' },
+  { label: 'Turquoise', value: '#99F6E4', group: 'clair-fixe' },
+  { label: 'Rouge pâle', value: '#FECACA', group: 'clair-fixe' },
 
   // Clair · Dégradés
-  { label: 'Aurore',         value: 'linear-gradient(135deg,#fce4ec,#e3f2fd)',          group: 'clair-deg' },
-  { label: 'Printemps',      value: 'linear-gradient(135deg,#d1fae5,#e0f2fe)',           group: 'clair-deg' },
-  { label: 'Coucher soleil', value: 'linear-gradient(135deg,#fff3e0,#fce4ec)',           group: 'clair-deg' },
-  { label: 'Coton candy',    value: 'linear-gradient(135deg,#fce4ec,#f3e5f5)',           group: 'clair-deg' },
-  { label: 'Miel',           value: 'linear-gradient(135deg,#fffde7,#fff3e0)',           group: 'clair-deg' },
-  { label: 'Ciel matin',     value: 'linear-gradient(180deg,#e0f2fe,#f0fdf4)',           group: 'clair-deg' },
-  { label: 'Brume lilas',    value: 'linear-gradient(135deg,#ede9fe,#fce7f3)',           group: 'clair-deg' },
-  { label: 'Aquarelle',      value: 'linear-gradient(135deg,#e0f2fe,#ede9fe,#fce7f3)',  group: 'clair-deg' },
+  { label: 'Aurore', value: 'linear-gradient(135deg,#fce4ec,#e3f2fd)', group: 'clair-deg' },
+  { label: 'Printemps', value: 'linear-gradient(135deg,#d1fae5,#e0f2fe)', group: 'clair-deg' },
+  { label: 'Coucher soleil', value: 'linear-gradient(135deg,#fff3e0,#fce4ec)', group: 'clair-deg' },
+  { label: 'Coton candy', value: 'linear-gradient(135deg,#fce4ec,#f3e5f5)', group: 'clair-deg' },
+  { label: 'Miel', value: 'linear-gradient(135deg,#fffde7,#fff3e0)', group: 'clair-deg' },
+  { label: 'Ciel matin', value: 'linear-gradient(180deg,#e0f2fe,#f0fdf4)', group: 'clair-deg' },
+  { label: 'Brume lilas', value: 'linear-gradient(135deg,#ede9fe,#fce7f3)', group: 'clair-deg' },
+  { label: 'Aquarelle', value: 'linear-gradient(135deg,#e0f2fe,#ede9fe,#fce7f3)', group: 'clair-deg' },
 
   // Sombre · Couleurs
-  { label: 'Gris foncé',   value: '#1F2937', group: 'sombre-fixe' },
-  { label: 'Bleu nuit',    value: '#0F172A', group: 'sombre-fixe' },
-  { label: 'Violet',       value: '#2E1065', group: 'sombre-fixe' },
-  { label: 'Vert forêt',   value: '#052E16', group: 'sombre-fixe' },
-  { label: 'Bordeaux',     value: '#3B0A0A', group: 'sombre-fixe' },
-  { label: 'Ardoise',      value: '#0F1923', group: 'sombre-fixe' },
-  { label: 'Anthracite',   value: '#18181B', group: 'sombre-fixe' },
-  { label: 'Chocolat',     value: '#1C1008', group: 'sombre-fixe' },
+  { label: 'Gris foncé', value: '#1F2937', group: 'sombre-fixe' },
+  { label: 'Bleu nuit', value: '#0F172A', group: 'sombre-fixe' },
+  { label: 'Violet', value: '#2E1065', group: 'sombre-fixe' },
+  { label: 'Vert forêt', value: '#052E16', group: 'sombre-fixe' },
+  { label: 'Bordeaux', value: '#3B0A0A', group: 'sombre-fixe' },
+  { label: 'Ardoise', value: '#0F1923', group: 'sombre-fixe' },
+  { label: 'Anthracite', value: '#18181B', group: 'sombre-fixe' },
+  { label: 'Chocolat', value: '#1C1008', group: 'sombre-fixe' },
 
   // Sombre · Dégradés
-  { label: 'Océan nuit',    value: 'linear-gradient(135deg,#1e3a5f,#0f172a)',             group: 'sombre-deg' },
-  { label: 'Cosmos',        value: 'linear-gradient(135deg,#2e1065,#1e1b4b)',             group: 'sombre-deg' },
-  { label: 'Jungle',        value: 'linear-gradient(135deg,#052e16,#0f172a)',             group: 'sombre-deg' },
-  { label: 'Aurore boréale',value: 'linear-gradient(135deg,#042f2e,#0e7490,#1e1b4b)',    group: 'sombre-deg' },
-  { label: 'Feu & braise',  value: 'linear-gradient(135deg,#1c0a0a,#7c2d12,#1c0a0a)',   group: 'sombre-deg' },
-  { label: 'Galaxie',       value: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)',    group: 'sombre-deg' },
-  { label: 'Crépuscule',    value: 'linear-gradient(160deg,#1a1a2e,#16213e,#0f3460)',    group: 'sombre-deg' },
-  { label: 'Forêt noire',   value: 'linear-gradient(135deg,#0a0a0a,#1a2a1a)',            group: 'sombre-deg' },
+  { label: 'Océan nuit', value: 'linear-gradient(135deg,#1e3a5f,#0f172a)', group: 'sombre-deg' },
+  { label: 'Cosmos', value: 'linear-gradient(135deg,#2e1065,#1e1b4b)', group: 'sombre-deg' },
+  { label: 'Jungle', value: 'linear-gradient(135deg,#052e16,#0f172a)', group: 'sombre-deg' },
+  { label: 'Aurore boréale', value: 'linear-gradient(135deg,#042f2e,#0e7490,#1e1b4b)', group: 'sombre-deg' },
+  { label: 'Feu & braise', value: 'linear-gradient(135deg,#1c0a0a,#7c2d12,#1c0a0a)', group: 'sombre-deg' },
+  { label: 'Galaxie', value: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)', group: 'sombre-deg' },
+  { label: 'Crépuscule', value: 'linear-gradient(160deg,#1a1a2e,#16213e,#0f3460)', group: 'sombre-deg' },
+  { label: 'Forêt noire', value: 'linear-gradient(135deg,#0a0a0a,#1a2a1a)', group: 'sombre-deg' },
 
   // Animés
-  { label: 'Galaxie ✨', value: 'animated:galaxy',  group: 'anim', icon: '🌌', preview: 'radial-gradient(ellipse,#1a2a4a,#000005)' },
-  { label: 'Aurore 🌟',  value: 'animated:aurora',  group: 'anim', icon: '🌟', preview: 'linear-gradient(135deg,#042f2e,#0d1117)' },
-  { label: 'Bulles 🫧',  value: 'animated:bubbles', group: 'anim', icon: '🫧', preview: 'linear-gradient(135deg,#0f172a,#1e3a5f)' },
-  { label: 'Vagues 🌊',  value: 'animated:waves',   group: 'anim', icon: '🌊', preview: 'linear-gradient(135deg,#1e3a5f,#7c3aed,#0e7490)' },
-  { label: 'Coucher 🌅', value: 'animated:sunset',  group: 'anim', icon: '🌅', preview: 'linear-gradient(135deg,#ff6b6b,#feca57,#ff9ff3)' },
+  { label: 'Galaxie ✨', value: 'animated:galaxy', group: 'anim', icon: '🌌', preview: 'radial-gradient(ellipse,#1a2a4a,#000005)' },
+  { label: 'Aurore 🌟', value: 'animated:aurora', group: 'anim', icon: '🌟', preview: 'linear-gradient(135deg,#042f2e,#0d1117)' },
+  { label: 'Bulles 🫧', value: 'animated:bubbles', group: 'anim', icon: '🫧', preview: 'linear-gradient(135deg,#0f172a,#1e3a5f)' },
+  { label: 'Vagues 🌊', value: 'animated:waves', group: 'anim', icon: '🌊', preview: 'linear-gradient(135deg,#1e3a5f,#7c3aed,#0e7490)' },
+  { label: 'Coucher 🌅', value: 'animated:sunset', group: 'anim', icon: '🌅', preview: 'linear-gradient(135deg,#ff6b6b,#feca57,#ff9ff3)' },
 ];
 
 export default function ConversationSettings({ conversation, currentUserId, onClose, onDeleted, onLeft }) {
@@ -65,9 +65,9 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
   const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const isGroupe = conversation.type === 'group';
   const convKey = isGroupe
-  ? 'groupe_' + conversation.id
-  : 'dm_' + Math.min(Number(currentUserId), Number(conversation.id)) 
-  + '_' + Math.max(Number(currentUserId), Number(conversation.id));
+    ? 'groupe_' + conversation.id
+    : 'dm_' + Math.min(Number(currentUserId), Number(conversation.id))
+    + '_' + Math.max(Number(currentUserId), Number(conversation.id));
 
   const [members, setMembers] = useState([]);
   const [friends, setFriends] = useState([]);
@@ -84,15 +84,43 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
   const groupPhoto = photoOverride && photoOverride.base === currentPhoto ? photoOverride.value : currentPhoto;
   const [photoMsg, setPhotoMsg] = useState('');
   const [addError, setAddError] = useState('');
+  const [addInfo, setAddInfo] = useState('');
+  const [requests, setRequests] = useState([]);
+  const [settingsMsg, setSettingsMsg] = useState('');
+  // Réglage affiché tout de suite après le clic ; ignoré dès que la conversation (prop) a suivi
+  const [approvalOverride, setApprovalOverride] = useState(null);
+  const currentApproval = !!conversation.add_requires_approval;
+  const approval = approvalOverride && approvalOverride.base === currentApproval ? approvalOverride.value : currentApproval;
 
   const isAdmin = isGroupe && conversation.admin_id === currentUserId;
 
   useEffect(() => {
     fetchSettings();
-    if (isGroupe) fetchMembers();
+    if (isGroupe) { fetchMembers(); fetchRequests(); }
     fetchAttachments();
     fetchFriends();
   }, []);
+
+  // Une demande d'ajout est créée, acceptée ou refusée (par n'importe qui) : on recharge
+  useEffect(() => {
+    if (!isGroupe) return;
+    const onChange = ({ groupeId }) => {
+      if (Number(groupeId) === Number(conversation.id)) { fetchRequests(); fetchMembers(); }
+    };
+    socket.on('addRequestsChanged', onChange);
+    return () => socket.off('addRequestsChanged', onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id]);
+
+  async function fetchRequests() {
+    try {
+      const r = await fetch(`${API}/groupes/${conversation.id}/add-requests`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await r.json();
+      setRequests(Array.isArray(data) ? data : []);
+    } catch { setRequests([]); }
+  }
 
   async function fetchSettings() {
     try {
@@ -175,6 +203,36 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
       return;
     }
     setAddError('');
+    const d = await res.json().catch(() => ({}));
+    setAddInfo(res.status === 202
+      ? (d.alreadyRequested ? 'Une demande est déjà en attente pour cette personne.' : "Demande envoyée : l'admin doit la valider.")
+      : '');
+    fetchMembers();
+    fetchRequests();
+  }
+
+  async function toggleApproval(value) {
+    setSettingsMsg('');
+    const res = await fetch(`${API}/groupes/${conversation.id}/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ add_requires_approval: value })
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setSettingsMsg(d.error || 'Erreur'); return; }
+    setApprovalOverride({ base: currentApproval, value: d.add_requires_approval });
+  }
+
+  async function handleRequest(requestId, action) {
+    setSettingsMsg('');
+    const res = await fetch(`${API}/groupes/${conversation.id}/add-requests/${requestId}/${action}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setSettingsMsg(d.error || 'Erreur');
+    }
+    fetchRequests();
     fetchMembers();
   }
 
@@ -289,6 +347,9 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
             <button key={t} onClick={() => setTab(t)}
               className={`text-xs px-2 py-1 rounded ${tab === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'}`}>
               {tabLabels[t]}
+              {t === 'membres' && isAdmin && requests.length > 0 && (
+                <span className="ml-1 bg-red-500 text-white rounded-full px-1.5 text-[10px] font-bold">{requests.length}</span>
+              )}
             </button>
           ))}
         </div>
@@ -298,6 +359,50 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
           {/* MEMBRES */}
           {tab === 'membres' && isGroupe && (
             <div className="space-y-2">
+              {isAdmin && (
+                <div className="pb-3 mb-2 border-b border-gray-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-white">Valider les ajouts de membres</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {approval
+                          ? "Les ajouts proposés par les membres doivent être acceptés par vous."
+                          : 'Tous les membres peuvent ajouter des personnes.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={approval}
+                      onClick={() => toggleApproval(!approval)}
+                      className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${approval ? 'bg-blue-600' : 'bg-gray-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${approval ? 'translate-x-4' : ''}`} />
+                    </button>
+                  </div>
+                  {settingsMsg && <p className="text-xs text-red-400 mt-2">{settingsMsg}</p>}
+                </div>
+              )}
+              {isAdmin && requests.length > 0 && (
+                <div className="bg-yellow-900/20 rounded-lg p-3 space-y-2 border border-yellow-700/40">
+                  <p className="text-xs text-yellow-300 font-semibold uppercase">Demandes d'ajout ({requests.length})</p>
+                  {requests.map(rq => (
+                    <div key={rq.id} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Avatar src={rq.avatar_url} name={rq.pseudo} size={28} />
+                        <div className="min-w-0">
+                          <p className="text-white text-sm truncate">{rq.pseudo}</p>
+                          <p className="text-gray-400 text-xs truncate">proposé par {rq.requested_by_pseudo}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => handleRequest(rq.id, 'approve')} className="text-xs text-green-400 hover:text-green-300">Accepter</button>
+                        <button onClick={() => handleRequest(rq.id, 'reject')} className="text-xs text-red-400 hover:text-red-300">Refuser</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {members.map(m => (
                 <div key={m.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -340,19 +445,30 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
           {tab === 'ajouter' && isGroupe && (
             <div className="space-y-2">
               {members.length >= 20 && <p className="text-yellow-400 text-sm">Groupe plein (20/20)</p>}
+              {approval && !isAdmin && (
+                <p className="text-xs text-gray-400">L'admin valide les ajouts : votre proposition lui sera envoyée.</p>
+              )}
               {addError && <p className="text-red-400 text-sm">{addError}</p>}
+              {addInfo && <p className="text-green-400 text-sm">{addInfo}</p>}
               {friends
                 .filter(f => !members.find(m => m.id === f.user_id))
-                .map(f => (
-                  <div key={f.user_id} className="flex items-center justify-between">
-                    <span className="text-white text-sm">{f.pseudo}</span>
-                    <button onClick={() => addMember(f.user_id)}
-                      disabled={members.length >= 20}
-                      className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">
-                      Ajouter
-                    </button>
-                  </div>
-                ))}
+                .map(f => {
+                  const pending = requests.some(rq => rq.user_id === f.user_id);
+                  return (
+                    <div key={f.user_id} className="flex items-center justify-between">
+                      <span className="text-white text-sm">{f.pseudo}</span>
+                      {pending ? (
+                        <span className="text-xs text-yellow-400">En attente de validation</span>
+                      ) : (
+                        <button onClick={() => addMember(f.user_id)}
+                          disabled={members.length >= 20}
+                          className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">
+                          {approval && !isAdmin ? "Proposer l'ajout" : 'Ajouter'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           )}
 
@@ -383,11 +499,11 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
 
               {/* Helper to render a grid of bg swatches */}
               {[
-                { key: 'default',     title: null },
-                { key: 'clair-fixe',  title: 'Clair — couleurs' },
-                { key: 'clair-deg',   title: 'Clair — dégradés' },
+                { key: 'default', title: null },
+                { key: 'clair-fixe', title: 'Clair — couleurs' },
+                { key: 'clair-deg', title: 'Clair — dégradés' },
                 { key: 'sombre-fixe', title: 'Sombre — couleurs' },
-                { key: 'sombre-deg',  title: 'Sombre — dégradés' },
+                { key: 'sombre-deg', title: 'Sombre — dégradés' },
               ].map(({ key, title }) => {
                 const items = BACKGROUNDS.filter(b => b.group === key);
                 if (!items.length) return null;
@@ -452,13 +568,13 @@ export default function ConversationSettings({ conversation, currentUserId, onCl
               {attachments.length === 0
                 ? <p className="text-gray-500 text-sm">Aucun média partagé</p>
                 : <div className="grid grid-cols-3 gap-1">
-                    {attachments.map(a => (
-                      <img key={a.id} src={a.attachment_url}
-                        className="w-full aspect-square object-cover rounded cursor-pointer hover:opacity-80"
-                        onClick={() => setLightboxUrl(a.attachment_url)}
-                      />
-                    ))}
-                  </div>
+                  {attachments.map(a => (
+                    <img key={a.id} src={a.attachment_url}
+                      className="w-full aspect-square object-cover rounded cursor-pointer hover:opacity-80"
+                      onClick={() => setLightboxUrl(a.attachment_url)}
+                    />
+                  ))}
+                </div>
               }
             </div>
           )}
